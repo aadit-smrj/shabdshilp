@@ -1,0 +1,202 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body {
+    overflow-anchor: none;
+  }
+  body {
+    font-family: 'Plus Jakarta Sans', 'Noto Sans Devanagari', system-ui, -apple-system, sans-serif;
+    background-color: #F8FAFC;
+    color: #0F172A;
+    min-height: 100vh;
+  }
+}
+
+/* Global site-wide theme synchronization across all sections & pages */
+html[data-theme="emerald"] {
+  --color-indigo-50: #ecfdf5;
+  --color-indigo-100: #d1fae5;
+  --color-indigo-200: #a7f3d0;
+  --color-indigo-300: #6ee7b7;
+  --color-indigo-400: #34d399;
+  --color-indigo-500: #10b981;
+  --color-indigo-600: #059669;
+  --color-indigo-700: #047857;
+  --color-indigo-800: #065f46;
+  --color-indigo-900: #064e3b;
+  --color-indigo-950: #022c22;
+
+  --color-violet-50: #f0fdfa;
+  --color-violet-100: #ccfbf1;
+  --color-violet-200: #99f6e4;
+  --color-violet-300: #5eead4;
+  --color-violet-400: #2dd4bf;
+  --color-violet-500: #14b8a6;
+  --color-violet-600: #0d9488;
+  --color-violet-700: #0f766e;
+  --color-violet-800: #115e59;
+  --color-violet-900: #134e4a;
+  --color-violet-950: #042f2e;
+}
+
+html[data-theme="violet"] {
+  --color-indigo-50: #f5f3ff;
+  --color-indigo-100: #ede9fe;
+  --color-indigo-200: #ddd6fe;
+  --color-indigo-300: #c4b5fd;
+  --color-indigo-400: #a78bfa;
+  --color-indigo-500: #8b5cf6;
+  --color-indigo-600: #7c3aed;
+  --color-indigo-700: #6d28d9;
+  --color-indigo-800: #5b21b6;
+  --color-indigo-900: #4c1d95;
+  --color-indigo-950: #2e1065;
+
+  --color-violet-50: #faf5ff;
+  --color-violet-100: #f3e8ff;
+  --color-violet-200: #e9d5ff;
+  --color-violet-300: #d8b4fe;
+  --color-violet-400: #c084fc;
+  --color-violet-500: #a855f7;
+  --color-violet-600: #9333ea;
+  --color-violet-700: #7e22ce;
+  --color-violet-800: #6b21a8;
+  --color-violet-900: #581c87;
+  --color-violet-950: #3b0764;
+}
+
+html[data-theme="rose"] {
+  --color-indigo-50: #fff1f2;
+  --color-indigo-100: #ffe4e6;
+  --color-indigo-200: #fecdd3;
+  --color-indigo-300: #fda4af;
+  --color-indigo-400: #fb7185;
+  --color-indigo-500: #f43f5e;
+  --color-indigo-600: #e11d48;
+  --color-indigo-700: #be123c;
+  --color-indigo-800: #9f1239;
+  --color-indigo-900: #881337;
+  --color-indigo-950: #4c0519;
+
+  --color-violet-50: #fdf2f8;
+  --color-violet-100: #fce7f3;
+  --color-violet-200: #fbcfe8;
+  --color-violet-300: #f9a8d4;
+  --color-violet-400: #f472b6;
+  --color-violet-500: #ec4899;
+  --color-violet-600: #db2777;
+  --color-violet-700: #be185d;
+  --color-violet-800: #9d174d;
+  --color-violet-900: #831843;
+  --color-violet-950: #500724;
+}
+
+html[data-theme="multicolor"] {
+  --color-indigo-50: #ecfeff;
+  --color-indigo-100: #cffafe;
+  --color-indigo-200: #a5f3fc;
+  --color-indigo-300: #67e8f9;
+  --color-indigo-400: #22d3ee;
+  --color-indigo-500: #06b6d4;
+  --color-indigo-600: #0891b2;
+  --color-indigo-700: #0e7490;
+  --color-indigo-800: #155e75;
+  --color-indigo-900: #164e63;
+  --color-indigo-950: #083344;
+
+  --color-violet-50: #fffbeb;
+  --color-violet-100: #fef3c7;
+  --color-violet-200: #fde68a;
+  --color-violet-300: #fcd34d;
+  --color-violet-400: #fbbf24;
+  --color-violet-500: #f59e0b;
+  --color-violet-600: #d97706;
+  --color-violet-700: #b45309;
+  --color-violet-800: #92400e;
+  --color-violet-900: #78350f;
+  --color-violet-950: #451a03;
+}
+
+/* Global tactile button hover-down animation */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  transition-property: transform, translate, scale, rotate, color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+button:not(:disabled):hover,
+[role="button"]:not([aria-disabled="true"]):hover {
+  transform: translateY(3px);
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: translateY(5px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):hover,
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):hover,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: none;
+  }
+}
+
+.font-editorial, .font-serif-display {
+  font-family: 'Outfit', 'Playfair Display', 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: 'Plus Jakarta Sans', 'Noto Sans Devanagari', system-ui, sans-serif;
+}
+
+.font-hindi {
+  font-family: 'Noto Sans Devanagari', 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Custom modern scrollbar with royal indigo tone */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
+
+#shabdshilp-print-root {
+  display: none;
+}
+
+@media print {
+  header, footer, nav, .no-print, .print\:hidden {
+    display: none !important;
+  }
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  body.shabdshilp-print-active > *:not(#shabdshilp-print-root) {
+    display: none !important;
+  }
+  body.shabdshilp-print-active #shabdshilp-print-root {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+}

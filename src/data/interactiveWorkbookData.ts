@@ -1,0 +1,732 @@
+import {
+  GradeLevel,
+  InteractiveWorkbookDefinition,
+  QuizQuestion,
+  UserProgressState,
+  WorksheetItem,
+} from '../types';
+import { getCurriculumForGrade } from './classCurriculum';
+import { getSimulationMetadata } from './simulationMetadata';
+
+export interface WorkbookPrerequisiteItem {
+  moduleId: string;
+  titleHindi: string;
+  completedCount: number;
+  requiredCount: number;
+  passed: boolean;
+}
+
+export interface WorkbookGateStatus {
+  isUnlockedBySim: boolean;
+  requirements: WorkbookPrerequisiteItem[];
+}
+
+const MODULE_TITLE_FALLBACK: Record<string, string> = {
+  sangya: 'संज्ञा (Noun)',
+  sarvanam: 'सर्वनाम (Pronoun)',
+  visheshan: 'विशेषण (Adjective)',
+  'visheshan-nirman': 'विशेषण निर्माण (Adjective Derivation)',
+  kriya: 'क्रिया (Verbs)',
+  'kriya-kaal': 'क्रिया और काल (Verbs & Tense)',
+  kaal: 'काल (Tenses)',
+  karak: 'कारक एवं परसर्ग (Case Markers)',
+  ling: 'लिंग (Gender)',
+  vachan: 'वचन (Number)',
+  vachya: 'वाच्य (Voice)',
+  vakya: 'वाक्य और उसके भेद (Sentence Types)',
+  'vakya-vichar': 'वाक्य-विचार (Sentence Structure)',
+  'vakya-parivartan': 'वाक्य-परिवर्तन (Sentence Transformation)',
+  'vakya-ashuddhi': 'वाक्य व अशुद्धि शोधन',
+  'upsarg-pratyay': 'उपसर्ग और प्रत्यय',
+  samas: 'समास (Compounds)',
+  avikari: 'अविकारी शब्द / अव्यय',
+  'pad-parichay': 'पद-परिचय',
+  muhavare: 'मुहावरे और लोकोक्तियाँ',
+  'shabd-vichar': 'शब्द-विचार',
+  'shabd-bhandar': 'शब्द-भंडार',
+  'viram-chinh': 'विराम-चिह्न',
+  'vartani-shuddhi': 'वर्तनी शुद्धि',
+  'vakya-shuddhi': 'वाक्य शुद्धि',
+};
+
+export function normalizeHindiToken(token: string): string {
+  return (token || '')
+    .replace(/[।,!?;:'"“”‘’()[\]{}\-–—]/g, '')
+    .trim();
+}
+
+export function getSimCompletionCount(
+  progress: Pick<UserProgressState, 'simulationCompletions' | 'completedSimulationModules'>,
+  moduleId: string
+): number {
+  const mapCount = Number(progress.simulationCompletions?.[moduleId] || 0);
+  if (mapCount > 0) return mapCount;
+  return (progress.completedSimulationModules || []).includes(moduleId) ? 1 : 0;
+}
+
+export function checkInteractiveWorkbookGate(
+  workbook: InteractiveWorkbookDefinition,
+  grade: GradeLevel,
+  progress: Pick<UserProgressState, 'simulationCompletions' | 'completedSimulationModules'>
+): WorkbookGateStatus {
+  const curriculum = getCurriculumForGrade(grade);
+  const resolvedIds = workbook.requiredLessonModuleIds.map((reqId, idx) => {
+    if (curriculum.simulationModuleIds.includes(reqId)) return reqId;
+    if (reqId === 'kriya' && curriculum.simulationModuleIds.includes('kriya-kaal')) return 'kriya-kaal';
+    if (reqId === 'vakya' && curriculum.simulationModuleIds.includes('vakya-parivartan')) return 'vakya-parivartan';
+    if (reqId === 'vakya' && curriculum.simulationModuleIds.includes('vakya-vichar')) return 'vakya-vichar';
+    if (reqId === 'visheshan' && curriculum.simulationModuleIds.includes('visheshan-nirman')) return 'visheshan-nirman';
+    return curriculum.simulationModuleIds[idx % curriculum.simulationModuleIds.length] || reqId;
+  });
+
+  const uniqueReqIds = Array.from(new Set(resolvedIds));
+  const requirements: WorkbookPrerequisiteItem[] = uniqueReqIds.map((modId) => {
+    const count = getSimCompletionCount(progress, modId);
+    const meta = getSimulationMetadata(modId);
+    const titleHindi = MODULE_TITLE_FALLBACK[modId] || meta.uniqueSimNameHindi || modId;
+    const reqCount = workbook.minCompletionsPerRequiredLesson || 1;
+    return {
+      moduleId: modId,
+      titleHindi,
+      completedCount: count,
+      requiredCount: reqCount,
+      passed: count >= reqCount,
+    };
+  });
+
+  return {
+    isUnlockedBySim: requirements.every((r) => r.passed),
+    requirements,
+  };
+}
+
+export function checkStoreWorksheetGate(
+  ws: WorksheetItem,
+  grade: GradeLevel,
+  progress: Pick<UserProgressState, 'simulationCompletions' | 'completedSimulationModules'>
+): WorkbookGateStatus {
+  const curriculum = getCurriculumForGrade(grade);
+  const titleAndTopics = `${ws.titleHindi} ${(ws.topicsCovered || []).join(' ')}`.toLowerCase();
+
+  const candidateIds: string[] = [];
+  if (/कारक|चिह्न/.test(titleAndTopics)) candidateIds.push('karak');
+  if (/लिंग|वचन/.test(titleAndTopics)) candidateIds.push('ling', 'vachan');
+  if (/संज्ञा|सर्वनाम/.test(titleAndTopics)) candidateIds.push('sangya', 'sarvanam');
+  if (/विशेषण/.test(titleAndTopics)) candidateIds.push('visheshan');
+  if (/क्रिया|काल|वाच्य/.test(titleAndTopics)) candidateIds.push('kaal', 'vachya');
+  if (/वाक्य/.test(titleAndTopics)) candidateIds.push('vakya', 'vakya-vichar');
+  if (/मुहावर|लोकोक्ति/.test(titleAndTopics)) candidateIds.push('muhavare');
+  if (/समास|उपसर्ग|प्रत्यय/.test(titleAndTopics)) candidateIds.push('upsarg-pratyay', 'samas');
+
+  const filtered = candidateIds
+    .map((id) => {
+      if (curriculum.simulationModuleIds.includes(id)) return id;
+      if (id === 'vakya' && curriculum.simulationModuleIds.includes('vakya-parivartan')) return 'vakya-parivartan';
+      if (id === 'visheshan' && curriculum.simulationModuleIds.includes('visheshan-nirman')) return 'visheshan-nirman';
+      if (id === 'kriya' && curriculum.simulationModuleIds.includes('kriya-kaal')) return 'kriya-kaal';
+      return null;
+    })
+    .filter((id): id is string => Boolean(id));
+
+  const lessonIds = Array.from(
+    new Set(
+      filtered.length >= 2
+        ? filtered.slice(0, 2)
+        : [
+            filtered[0] || curriculum.simulationModuleIds[0],
+            curriculum.simulationModuleIds.find((id) => id !== (filtered[0] || curriculum.simulationModuleIds[0])) ||
+              curriculum.simulationModuleIds[1] ||
+              curriculum.simulationModuleIds[0],
+          ].filter(Boolean)
+    )
+  );
+
+  const requirements: WorkbookPrerequisiteItem[] = lessonIds.map((modId) => {
+    const count = getSimCompletionCount(progress, modId);
+    const meta = getSimulationMetadata(modId);
+    return {
+      moduleId: modId,
+      titleHindi: MODULE_TITLE_FALLBACK[modId] || meta.uniqueSimNameHindi || modId,
+      completedCount: count,
+      requiredCount: 1,
+      passed: count >= 1,
+    };
+  });
+
+  return {
+    isUnlockedBySim: requirements.every((r) => r.passed),
+    requirements,
+  };
+}
+
+const MCQ_SHABD_1: QuizQuestion[] = [
+  {
+    id: 'iwb_mcq_sb_1',
+    topicId: 'sangya',
+    topicNameHindi: 'संज्ञा',
+    topicNameEnglish: 'Noun (Sangya)',
+    questionHindi: '“मिठास” और “ईमानदारी” शब्द संज्ञा के किस भेद के अंतर्गत आते हैं?',
+    questionEnglish: 'Under which type of Sangya do "Mithaas" and "Imaandaari" fall?',
+    options: [
+      { textHindi: 'व्यक्तिवाचक संज्ञा', textEnglish: 'Proper Noun' },
+      { textHindi: 'जातिवाचक संज्ञा', textEnglish: 'Common Noun' },
+      { textHindi: 'भाववाचक संज्ञा', textEnglish: 'Abstract Noun' },
+      { textHindi: 'द्रव्यवाचक संज्ञा', textEnglish: 'Material Noun' },
+    ],
+    correctIndex: 2,
+    explanationHindi: 'गुण, दशा या भाव का बोध कराने वाले शब्द भाववाचक संज्ञा कहलाते हैं।',
+    explanationEnglish: 'Words denoting qualities, states, or emotions are Abstract Nouns.',
+  },
+  {
+    id: 'iwb_mcq_sb_2',
+    topicId: 'sarvanam',
+    topicNameHindi: 'सर्वनाम',
+    topicNameEnglish: 'Pronoun (Sarvanam)',
+    questionHindi: '“जैसा करोगे, वैसा भरोगे।” — इस वाक्य में प्रयुक्त सर्वनाम का सटीक भेद क्या है?',
+    questionEnglish: 'Identify the Pronoun type in "Jaisa karoge, vaisa bharoge."',
+    options: [
+      { textHindi: 'निजवाचक सर्वनाम', textEnglish: 'Reflexive Pronoun' },
+      { textHindi: 'संबंधवाचक सर्वनाम', textEnglish: 'Relative Pronoun' },
+      { textHindi: 'अनिश्चयवाचक सर्वनाम', textEnglish: 'Indefinite Pronoun' },
+      { textHindi: 'प्रश्नवाचक सर्वनाम', textEnglish: 'Interrogative Pronoun' },
+    ],
+    correctIndex: 1,
+    explanationHindi: '“जैसा–वैसा” दो उपवाक्यों में संबंध जोड़ते हैं, अतः यह संबंधवाचक सर्वनाम है।',
+    explanationEnglish: 'Correlative pairs like "जैसा–वैसा" form Relative Pronouns.',
+  },
+  {
+    id: 'iwb_mcq_sb_3',
+    topicId: 'visheshan',
+    topicNameHindi: 'विशेषण',
+    topicNameEnglish: 'Adjective (Visheshan)',
+    questionHindi: '“वह घर बहुत बड़ा है।” — इसमें रेखांकित शब्द “वह” किस विशेषण का उदाहरण है?',
+    questionEnglish: 'In "Vah ghar bahut bada hai", what kind of adjective is "Vah"?',
+    options: [
+      { textHindi: 'सार्वनामिक (संकेतवाचक) विशेषण', textEnglish: 'Demonstrative Adjective' },
+      { textHindi: 'निश्चित संख्यावाचक विशेषण', textEnglish: 'Definite Numeral Adjective' },
+      { textHindi: 'परिमाणवाचक विशेषण', textEnglish: 'Adjective of Quantity' },
+      { textHindi: 'व्यक्तिवाचक विशेषण', textEnglish: 'Proper Adjective' },
+    ],
+    correctIndex: 0,
+    explanationHindi: 'जब सर्वनाम किसी संज्ञा (“घर”) से ठीक पहले आकर उसकी ओर संकेत करे, तब वह सार्वनामिक विशेषण बनता है।',
+    explanationEnglish: 'When a pronoun precedes a noun to point it out, it acts as a Demonstrative Adjective.',
+  },
+  {
+    id: 'iwb_mcq_sb_4',
+    topicId: 'kriya',
+    topicNameHindi: 'क्रिया',
+    topicNameEnglish: 'Verbs (Kriya)',
+    questionHindi: '“माँ ने बच्चे को दूध पिलाया।” — रचना की दृष्टि से “पिलाया” किस प्रकार की क्रिया है?',
+    questionEnglish: 'Which verb form is "pilaya" in "Maa ne bachche ko doodh pilaya"?',
+    options: [
+      { textHindi: 'अकर्मक क्रिया', textEnglish: 'Intransitive Verb' },
+      { textHindi: 'प्रेरणार्थक क्रिया', textEnglish: 'Causative Verb' },
+      { textHindi: 'पूर्वकालिक क्रिया', textEnglish: 'Past Participle Verb' },
+      { textHindi: 'नामधातु क्रिया', textEnglish: 'Nominal Verb' },
+    ],
+    correctIndex: 1,
+    explanationHindi: 'जब कर्ता स्वयं कार्य न करके किसी दूसरे को कार्य करने की प्रेरणा दे (पीना → पिलाना), तो प्रेरणार्थक क्रिया होती है।',
+    explanationEnglish: 'Causative verbs denote actions caused by the subject for someone else.',
+  },
+];
+
+const MCQ_VAKYA_1: QuizQuestion[] = [
+  {
+    id: 'iwb_mcq_vk_1',
+    topicId: 'vakya',
+    topicNameHindi: 'वाक्य-भेद',
+    topicNameEnglish: 'Sentence Types',
+    questionHindi: '“बादल घिरे और मूसलाधार वर्षा होने लगी।” — रचना के आधार पर यह कौन-सा वाक्य है?',
+    questionEnglish: 'Classify "Baadal ghire aur moosladhaar varsha hone lagi" by structure.',
+    options: [
+      { textHindi: 'सरल वाक्य', textEnglish: 'Simple Sentence' },
+      { textHindi: 'संयुक्त वाक्य', textEnglish: 'Compound Sentence' },
+      { textHindi: 'मिश्र वाक्य', textEnglish: 'Complex Sentence' },
+      { textHindi: 'आज्ञावाचक वाक्य', textEnglish: 'Imperative Sentence' },
+    ],
+    correctIndex: 1,
+    explanationHindi: 'दो स्वतंत्र उपवाक्य समानाधिकरण योजक “और” से जुड़े हैं, इसलिए यह संयुक्त वाक्य है।',
+    explanationEnglish: 'Two independent clauses joined by "और" form a Compound Sentence.',
+  },
+  {
+    id: 'iwb_mcq_vk_2',
+    topicId: 'vakya',
+    topicNameHindi: 'वाक्य-भेद',
+    topicNameEnglish: 'Sentence Types',
+    questionHindi: '“जो विद्यार्थी परिश्रम करते हैं, वे अवश्य सफल होते हैं।” — यह किस प्रकार का वाक्य है?',
+    questionEnglish: 'Identify the sentence structure: "Jo vidyarthi parishram karte hain, ve avashya safal hote hain."',
+    options: [
+      { textHindi: 'सरल वाक्य', textEnglish: 'Simple Sentence' },
+      { textHindi: 'संयुक्त वाक्य', textEnglish: 'Compound Sentence' },
+      { textHindi: 'मिश्र वाक्य', textEnglish: 'Complex Sentence' },
+      { textHindi: 'विस्मयादिबोधक वाक्य', textEnglish: 'Exclamatory Sentence' },
+    ],
+    correctIndex: 2,
+    explanationHindi: '“जो...वे” आश्रित और प्रधान उपवाक्य का संबंध दर्शाते हैं, अतः यह मिश्र वाक्य है।',
+    explanationEnglish: 'A main clause paired with a dependent clause ("जो...वे") creates a Complex Sentence.',
+  },
+  {
+    id: 'iwb_mcq_vk_3',
+    topicId: 'vakya',
+    topicNameHindi: 'वाक्य-भेद (अर्थ)',
+    topicNameEnglish: 'Sentence by Meaning',
+    questionHindi: '“काश! आज हल्की फुहारें पड़तीं।” — अर्थ के आधार पर यह कौन-सा वाक्य है?',
+    questionEnglish: 'Identify the meaning-based type of "Kaash! Aaj halki fuhaarein padteen."',
+    options: [
+      { textHindi: 'इच्छावाचक वाक्य', textEnglish: 'Optative Sentence' },
+      { textHindi: 'संदेहवाचक वाक्य', textEnglish: 'Doubtful Sentence' },
+      { textHindi: 'निषेधवाचक वाक्य', textEnglish: 'Negative Sentence' },
+      { textHindi: 'संकेतवाचक वाक्य', textEnglish: 'Conditional Sentence' },
+    ],
+    correctIndex: 0,
+    explanationHindi: 'जहाँ इच्छा, कामना या शुभकामना प्रकट हो, वहाँ इच्छावाचक वाक्य होता है।',
+    explanationEnglish: 'Sentences expressing wishes or desires are Optative Sentences.',
+  },
+  {
+    id: 'iwb_mcq_vk_4',
+    topicId: 'kaal',
+    topicNameHindi: 'काल',
+    topicNameEnglish: 'Tenses',
+    questionHindi: '“शायद कल पिताजी दिल्ली से लौटेंगे।” — इसमें काल और अर्थ भेद क्या है?',
+    questionEnglish: 'What is the tense and mood in "Shayad kal pitaji Dilli se lautenge"?',
+    options: [
+      { textHindi: 'सामान्य भूतकाल', textEnglish: 'Simple Past' },
+      { textHindi: 'संभाव्य भविष्यत् काल', textEnglish: 'Probable Future' },
+      { textHindi: 'अपूर्ण वर्तमान काल', textEnglish: 'Present Continuous' },
+      { textHindi: 'हेतुहेतुमद् भूतकाल', textEnglish: 'Conditional Past' },
+    ],
+    correctIndex: 1,
+    explanationHindi: '“शायद” तथा भविष्य सूचक क्रिया “लौटेंगे” से संभाव्य भविष्यत् काल प्रकट होता है।',
+    explanationEnglish: '"Shayad" combined with a future verb indicates Probable Future Tense.',
+  },
+];
+
+export const INTERACTIVE_WORKBOOKS: InteractiveWorkbookDefinition[] = [
+  {
+    id: 'wb_shabd_bhed_interactive',
+    titleHindi: 'अभ्यास पुस्तिका १: शब्द-भेद व गद्यांश चयन परीक्षण',
+    titleEnglish: 'Workbook 1: Shabd-Bhed & Zero-Hint Paragraph Analysis',
+    descriptionHindi:
+      'मानक बहुविकल्पीय प्रश्नों (MCQ) के साथ-साथ गद्यांश में से संज्ञा, विशेषण, सर्वनाम व क्रिया चुनकर उनका सटीक भेद पहचानने की अनूठी कार्य-पुस्तिका।',
+    descriptionEnglish:
+      'Mixes standard MCQs with interactive zero-hint paragraph word selection and Bhed classification.',
+    topicsCovered: ['संज्ञा', 'सर्वनाम', 'विशेषण', 'क्रिया'],
+    costWordCoins: 0,
+    requiredLessonModuleIds: ['sangya', 'sarvanam'],
+    minCompletionsPerRequiredLesson: 1,
+    mcqQuestions: MCQ_SHABD_1,
+    paragraphQuestions: [
+      {
+        id: 'para_w_visheshan_1',
+        mode: 'word',
+        topicId: 'visheshan',
+        topicNameHindi: 'विशेषण (Adjective)',
+        promptHindi: 'नीचे दिए गए अनुच्छेद पर क्लिक करके कोई एक विशेषण (Visheshan) शब्द चुनें:',
+        promptEnglish: 'Click and select any Adjective (Visheshan) word from the paragraph below:',
+        paragraphTitleHindi: 'प्रातःकालीन उपवन का दृश्य',
+        paragraphSentences: [
+          'सुंदर उद्यान में रंगीन तितलियाँ धीरे-धीरे उड़ रही थीं।',
+          'चार बच्चे ताज़ी हवा में प्रसन्नता से खेल रहे थे।',
+          'उन्होंने मीठे फल खाए और अपने मित्रों को भी दिए।',
+        ],
+        targetWordCategory: 'visheshan',
+        targetCategoryLabelHindi: 'विशेषण',
+        wordAnnotations: {
+          सुंदर: {
+            word: 'सुंदर',
+            categoryId: 'visheshan',
+            bhedHindi: 'गुणवाचक विशेषण',
+            roleHindi: 'संज्ञा “उद्यान” के गुण/सौंदर्य की विशेषता बता रहा है',
+          },
+          रंगीन: {
+            word: 'रंगीन',
+            categoryId: 'visheshan',
+            bhedHindi: 'गुणवाचक विशेषण',
+            roleHindi: 'संज्ञा “तितलियाँ” के रंग-रूप की विशेषता बता रहा है',
+          },
+          चार: {
+            word: 'चार',
+            categoryId: 'visheshan',
+            bhedHindi: 'निश्चित संख्यावाचक विशेषण',
+            roleHindi: 'संज्ञा “बच्चे” की सटीक संख्या का बोध करा रहा है',
+          },
+          ताज़ी: {
+            word: 'ताज़ी',
+            categoryId: 'visheshan',
+            bhedHindi: 'गुणवाचक विशेषण',
+            roleHindi: 'संज्ञा “हवा” की ताज़गी व गुणवत्ता बता रहा है',
+          },
+          मीठे: {
+            word: 'मीठे',
+            categoryId: 'visheshan',
+            bhedHindi: 'गुणवाचक विशेषण',
+            roleHindi: 'संज्ञा “फल” के स्वाद की विशेषता बता रहा है',
+          },
+        },
+        bhedOptions: [
+          { value: 'गुणवाचक विशेषण', labelHindi: 'गुणवाचक विशेषण (Qualitative)' },
+          { value: 'निश्चित संख्यावाचक विशेषण', labelHindi: 'निश्चित संख्यावाचक विशेषण (Definite Numeral)' },
+          { value: 'परिमाणवाचक विशेषण', labelHindi: 'परिमाणवाचक विशेषण (Quantitative)' },
+          { value: 'सार्वनामिक विशेषण', labelHindi: 'सार्वनामिक विशेषण (Demonstrative)' },
+        ],
+        roleOptions: [
+          { value: 'संज्ञा “उद्यान” के गुण/सौंदर्य की विशेषता बता रहा है', labelHindi: 'संज्ञा “उद्यान” के गुण/सौंदर्य की विशेषता बता रहा है' },
+          { value: 'संज्ञा “तितलियाँ” के रंग-रूप की विशेषता बता रहा है', labelHindi: 'संज्ञा “तितलियाँ” के रंग-रूप की विशेषता बता रहा है' },
+          { value: 'संज्ञा “बच्चे” की सटीक संख्या का बोध करा रहा है', labelHindi: 'संज्ञा “बच्चे” की सटीक संख्या का बोध करा रहा है' },
+          { value: 'संज्ञा “हवा” की ताज़गी व गुणवत्ता बता रहा है', labelHindi: 'संज्ञा “हवा” की ताज़गी व गुणवत्ता बता रहा है' },
+          { value: 'संज्ञा “फल” के स्वाद की विशेषता बता रहा है', labelHindi: 'संज्ञा “फल” के स्वाद की विशेषता बता रहा है' },
+          { value: 'वाक्य में मुख्य कर्ता या क्रिया का कार्य कर रहा है', labelHindi: 'वाक्य में मुख्य कर्ता या क्रिया का कार्य कर रहा है' },
+        ],
+        explanationHindi:
+          'इस अनुच्छेद में “सुंदर”, “रंगीन”, “चार”, “ताज़ी” और “मीठे” संज्ञा की विशेषता बताने वाले विशेषण शब्द हैं। “धीरे-धीरे” क्रियाविशेषण (अव्यय) है तथा “उन्होंने” सर्वनाम है।',
+        explanationEnglish:
+          '"सुंदर", "रंगीन", "चार", "ताज़ी", and "मीठे" are Adjectives modifying nouns in this passage.',
+      },
+      {
+        id: 'para_w_sangya_1',
+        mode: 'word',
+        topicId: 'sangya',
+        topicNameHindi: 'संज्ञा (Noun)',
+        promptHindi: 'अनुच्छेद में से कोई एक संज्ञा (Sangya) शब्द चुनें और फिर उसका भेद पहचानें:',
+        promptEnglish: 'Select any Noun (Sangya) word from the paragraph and classify its type:',
+        paragraphTitleHindi: 'प्रातःकालीन उपवन का दृश्य',
+        paragraphSentences: [
+          'सुंदर उद्यान में रंगीन तितलियाँ धीरे-धीरे उड़ रही थीं।',
+          'चार बच्चे ताज़ी हवा में प्रसन्नता से खेल रहे थे।',
+          'उन्होंने मीठे फल खाए और अपने मित्रों को भी दिए।',
+        ],
+        targetWordCategory: 'sangya',
+        targetCategoryLabelHindi: 'संज्ञा',
+        wordAnnotations: {
+          उद्यान: {
+            word: 'उद्यान',
+            categoryId: 'sangya',
+            bhedHindi: 'जातिवाचक संज्ञा',
+            roleHindi: 'अधिकरण कारक में स्थान (“उद्यान में”) का बोध करा रहा है',
+          },
+          तितलियाँ: {
+            word: 'तितलियाँ',
+            categoryId: 'sangya',
+            bhedHindi: 'जातिवाचक संज्ञा',
+            roleHindi: 'संपूर्ण तितली जाति व वाक्य में कर्ता पद है',
+          },
+          बच्चे: {
+            word: 'बच्चे',
+            categoryId: 'sangya',
+            bhedHindi: 'जातिवाचक संज्ञा',
+            roleHindi: 'खेलने की क्रिया का कर्ता पद है',
+          },
+          हवा: {
+            word: 'हवा',
+            categoryId: 'sangya',
+            bhedHindi: 'जातिवाचक संज्ञा',
+            roleHindi: 'प्राकृतिक तत्व के रूप में संज्ञा पद है',
+          },
+          प्रसन्नता: {
+            word: 'प्रसन्नता',
+            categoryId: 'sangya',
+            bhedHindi: 'भाववाचक संज्ञा',
+            roleHindi: 'आंतरिक भाव/मनोदशा का बोध करा रहा है',
+          },
+          फल: {
+            word: 'फल',
+            categoryId: 'sangya',
+            bhedHindi: 'जातिवाचक संज्ञा',
+            roleHindi: 'खाने की क्रिया के कर्म पद के रूप में प्रयुक्त है',
+          },
+          मित्रों: {
+            word: 'मित्रों',
+            categoryId: 'sangya',
+            bhedHindi: 'जातिवाचक संज्ञा',
+            roleHindi: 'संपूर्ण मित्र वर्ग का बोध व संप्रदान पद है',
+          },
+        },
+        bhedOptions: [
+          { value: 'व्यक्तिवाचक संज्ञा', labelHindi: 'व्यक्तिवाचक संज्ञा (Proper Noun)' },
+          { value: 'जातिवाचक संज्ञा', labelHindi: 'जातिवाचक संज्ञा (Common Noun)' },
+          { value: 'भाववाचक संज्ञा', labelHindi: 'भाववाचक संज्ञा (Abstract Noun)' },
+          { value: 'द्रव्यवाचक संज्ञा', labelHindi: 'द्रव्यवाचक संज्ञा (Material Noun)' },
+        ],
+        roleOptions: [
+          { value: 'अधिकरण कारक में स्थान (“उद्यान में”) का बोध करा रहा है', labelHindi: 'अधिकरण कारक में स्थान का बोध करा रहा है' },
+          { value: 'संपूर्ण तितली जाति व वाक्य में कर्ता पद है', labelHindi: 'जाति वर्ग व वाक्य में कर्ता पद है' },
+          { value: 'खेलने की क्रिया का कर्ता पद है', labelHindi: 'खेलने की क्रिया का कर्ता पद है' },
+          { value: 'आंतरिक भाव/मनोदशा का बोध करा रहा है', labelHindi: 'आंतरिक भाव/मनोदशा का बोध करा रहा है' },
+          { value: 'खाने की क्रिया के कर्म पद के रूप में प्रयुक्त है', labelHindi: 'क्रिया के कर्म पद के रूप में प्रयुक्त है' },
+          { value: 'संपूर्ण मित्र वर्ग का बोध व संप्रदान पद है', labelHindi: 'संपूर्ण मित्र वर्ग का बोध व संप्रदान पद है' },
+          { value: 'संज्ञा की विशेषता या काल दर्शा रहा है', labelHindi: 'संज्ञा की विशेषता या काल दर्शा रहा है' },
+        ],
+        explanationHindi:
+          '“प्रसन्नता” भाववाचक संज्ञा है, जबकि “उद्यान”, “तितलियाँ”, “बच्चे”, “हवा”, “फल” और “मित्रों” जातिवाचक संज्ञा हैं।',
+        explanationEnglish:
+          '"प्रसन्नता" is an Abstract Noun (भाववाचक) while "उद्यान", "तितलियाँ", "बच्चे", "हवा", "फल", and "मित्रों" are Common Nouns.',
+      },
+    ],
+  },
+  {
+    id: 'wb_vakya_bhed_interactive',
+    titleHindi: 'अभ्यास पुस्तिका २: वाक्य-भेद एवं रचना विश्लेषण परीक्षण',
+    titleEnglish: 'Workbook 2: Sentence-Level Vakya-Bhed & Grammar Workbook',
+    descriptionHindi:
+      'गद्यांश के पूरे वाक्यों को चुनकर सरल, संयुक्त व मिश्र वाक्य तथा अर्थ के आधार पर भेद परखने वाला पूर्ण भाषा परीक्षण।',
+    descriptionEnglish:
+      'Interactive sentence selection inside a full Hindi passage paired with Vakya Bhed classification and MCQs.',
+    topicsCovered: ['सरल वाक्य', 'संयुक्त वाक्य', 'मिश्र वाक्य', 'काल'],
+    costWordCoins: 0,
+    requiredLessonModuleIds: ['karak', 'vakya'],
+    minCompletionsPerRequiredLesson: 1,
+    mcqQuestions: MCQ_VAKYA_1,
+    paragraphQuestions: [
+      {
+        id: 'para_s_mishrit_1',
+        mode: 'sentence',
+        topicId: 'vakya',
+        topicNameHindi: 'वाक्य-भेद (रचना के आधार पर)',
+        promptHindi: 'नीचे दिए गए अनुच्छेद पर क्लिक करके कोई एक “मिश्र वाक्य (Complex Sentence)” चुनें:',
+        promptEnglish: 'Click and select a "Complex Sentence (मिश्र वाक्य)" from the paragraph below:',
+        paragraphTitleHindi: 'नियमित अभ्यास का महत्व',
+        paragraphSentences: [
+          'सवेरे सूर्य की किरणें धरती को आलोकित करती हैं।',
+          'रोहन ने अपना पाठ याद किया और वह विद्यालय चला गया।',
+          'जब अध्यापक कक्षा में आए, तब सभी विद्यार्थियों ने उनका स्वागत किया।',
+          'अरे वाह, तुमने तो कमाल कर दिया!',
+        ],
+        targetSentenceBhed: 'mishrit',
+        targetSentenceBhedLabelHindi: 'मिश्र वाक्य',
+        sentenceAnnotations: [
+          {
+            sentenceIndex: 0,
+            bhedType: 'saral',
+            bhedHindi: 'सरल वाक्य',
+            roleHindi: 'एक ही उद्देश्य और एक ही मुख्य विधेय (“आलोकित करती हैं”) है',
+          },
+          {
+            sentenceIndex: 1,
+            bhedType: 'sanyukt',
+            bhedHindi: 'संयुक्त वाक्य',
+            roleHindi: 'दो स्वतंत्र उपवाक्य समानाधिकरण योजक “और” से जुड़े हैं',
+          },
+          {
+            sentenceIndex: 2,
+            bhedType: 'mishrit',
+            bhedHindi: 'मिश्र वाक्य',
+            roleHindi: '“जब...तब” द्वारा आश्रित उपवाक्य प्रधान उपवाक्य से जुड़ा है',
+          },
+          {
+            sentenceIndex: 3,
+            bhedType: 'vismayadi',
+            bhedHindi: 'विस्मयादिबोधक वाक्य',
+            roleHindi: '“अरे वाह” से हर्ष और आश्चर्य का भाव प्रकट हो रहा है',
+          },
+        ],
+        bhedOptions: [
+          { value: 'सरल वाक्य', labelHindi: 'सरल वाक्य (Simple Sentence)' },
+          { value: 'संयुक्त वाक्य', labelHindi: 'संयुक्त वाक्य (Compound Sentence)' },
+          { value: 'मिश्र वाक्य', labelHindi: 'मिश्र वाक्य (Complex Sentence)' },
+          { value: 'विस्मयादिबोधक वाक्य', labelHindi: 'विस्मयादिबोधक वाक्य (Exclamatory)' },
+        ],
+        roleOptions: [
+          { value: 'एक ही उद्देश्य और एक ही मुख्य विधेय (“आलोकित करती हैं”) है', labelHindi: 'एक ही उद्देश्य और एक ही मुख्य विधेय है' },
+          { value: 'दो स्वतंत्र उपवाक्य समानाधिकरण योजक “और” से जुड़े हैं', labelHindi: 'दो स्वतंत्र उपवाक्य योजक “और” से जुड़े हैं' },
+          { value: '“जब...तब” द्वारा आश्रित उपवाक्य प्रधान उपवाक्य से जुड़ा है', labelHindi: '“जब...तब” से आश्रित व प्रधान उपवाक्य जुड़े हैं' },
+          { value: '“अरे वाह” से हर्ष और आश्चर्य का भाव प्रकट हो रहा है', labelHindi: 'हर्ष और आश्चर्य का भाव प्रकट हो रहा है' },
+        ],
+        explanationHindi:
+          'तीसरा वाक्य (“जब अध्यापक कक्षा में आए, तब सभी विद्यार्थियों ने उनका स्वागत किया।”) मिश्र वाक्य है क्योंकि इसमें “जब...तब” से आश्रित उपवाक्य जुड़ा है।',
+        explanationEnglish:
+          'Sentence 3 is a Complex Sentence (मिश्र वाक्य) linked by the subordinating pair "जब...तब".',
+      },
+      {
+        id: 'para_s_sanyukt_1',
+        mode: 'sentence',
+        topicId: 'vakya',
+        topicNameHindi: 'वाक्य-भेद (रचना के आधार पर)',
+        promptHindi: 'उसी अनुच्छेद पर क्लिक करके कोई एक “संयुक्त वाक्य (Compound Sentence)” चुनें:',
+        promptEnglish: 'Click and select a "Compound Sentence (संयुक्त वाक्य)" from the paragraph below:',
+        paragraphTitleHindi: 'नियमित अभ्यास का महत्व',
+        paragraphSentences: [
+          'सवेरे सूर्य की किरणें धरती को आलोकित करती हैं।',
+          'रोहन ने अपना पाठ याद किया और वह विद्यालय चला गया।',
+          'जब अध्यापक कक्षा में आए, तब सभी विद्यार्थियों ने उनका स्वागत किया।',
+          'अरे वाह, तुमने तो कमाल कर दिया!',
+        ],
+        targetSentenceBhed: 'sanyukt',
+        targetSentenceBhedLabelHindi: 'संयुक्त वाक्य',
+        sentenceAnnotations: [
+          {
+            sentenceIndex: 0,
+            bhedType: 'saral',
+            bhedHindi: 'सरल वाक्य',
+            roleHindi: 'एक ही उद्देश्य और एक ही मुख्य विधेय (“आलोकित करती हैं”) है',
+          },
+          {
+            sentenceIndex: 1,
+            bhedType: 'sanyukt',
+            bhedHindi: 'संयुक्त वाक्य',
+            roleHindi: 'दो स्वतंत्र उपवाक्य समानाधिकरण योजक “और” से जुड़े हैं',
+          },
+          {
+            sentenceIndex: 2,
+            bhedType: 'mishrit',
+            bhedHindi: 'मिश्र वाक्य',
+            roleHindi: '“जब...तब” द्वारा आश्रित उपवाक्य प्रधान उपवाक्य से जुड़ा है',
+          },
+          {
+            sentenceIndex: 3,
+            bhedType: 'vismayadi',
+            bhedHindi: 'विस्मयादिबोधक वाक्य',
+            roleHindi: '“अरे वाह” से हर्ष और आश्चर्य का भाव प्रकट हो रहा है',
+          },
+        ],
+        bhedOptions: [
+          { value: 'सरल वाक्य', labelHindi: 'सरल वाक्य (Simple Sentence)' },
+          { value: 'संयुक्त वाक्य', labelHindi: 'संयुक्त वाक्य (Compound Sentence)' },
+          { value: 'मिश्र वाक्य', labelHindi: 'मिश्र वाक्य (Complex Sentence)' },
+          { value: 'विस्मयादिबोधक वाक्य', labelHindi: 'विस्मयादिबोधक वाक्य (Exclamatory)' },
+        ],
+        roleOptions: [
+          { value: 'एक ही उद्देश्य और एक ही मुख्य विधेय (“आलोकित करती हैं”) है', labelHindi: 'एक ही उद्देश्य और एक ही मुख्य विधेय है' },
+          { value: 'दो स्वतंत्र उपवाक्य समानाधिकरण योजक “और” से जुड़े हैं', labelHindi: 'दो स्वतंत्र उपवाक्य योजक “और” से जुड़े हैं' },
+          { value: '“जब...तब” द्वारा आश्रित उपवाक्य प्रधान उपवाक्य से जुड़ा है', labelHindi: '“जब...तब” से आश्रित व प्रधान उपवाक्य जुड़े हैं' },
+          { value: '“अरे वाह” से हर्ष और आश्चर्य का भाव प्रकट हो रहा है', labelHindi: 'हर्ष और आश्चर्य का भाव प्रकट हो रहा है' },
+        ],
+        explanationHindi:
+          'दूसरा वाक्य (“रोहन ने अपना पाठ याद किया और वह विद्यालय चला गया।”) संयुक्त वाक्य है क्योंकि दो स्वतंत्र वाक्य “और” से जुड़े हैं।',
+        explanationEnglish:
+          'Sentence 2 is a Compound Sentence (संयुक्त वाक्य) combining two independent clauses with "और".',
+      },
+    ],
+  },
+  {
+    id: 'wb_mixed_master_interactive',
+    titleHindi: 'अभ्यास पुस्तिका ३: मिश्रित शब्द-वाक्य मास्टर परीक्षण (Word + Sentence)',
+    titleEnglish: 'Workbook 3: Mixed Word & Sentence Comprehensive Language Workbook',
+    descriptionHindi:
+      'MCQ प्रश्नों, शब्द-स्तर चयन (क्रिया व अव्यय) और वाक्य-स्तर पहचान (अर्थ व रचना भेद) का संपूर्ण बोर्ड-स्तरीय संवादात्मक परीक्षण।',
+    descriptionEnglish:
+      'Combined MCQ, word-level (Verb/Avyay), and sentence-level interactive evaluation without pre-submit hints.',
+    topicsCovered: ['क्रिया', 'अविकारी/अव्यय', 'वाक्य-भेद', 'सर्वनाम'],
+    costWordCoins: 0,
+    requiredLessonModuleIds: ['karak', 'muhavare'],
+    minCompletionsPerRequiredLesson: 1,
+    mcqQuestions: [MCQ_SHABD_1[2], MCQ_SHABD_1[3], MCQ_VAKYA_1[0], MCQ_VAKYA_1[2]],
+    paragraphQuestions: [
+      {
+        id: 'para_w_kriya_master',
+        mode: 'word',
+        topicId: 'kriya',
+        topicNameHindi: 'क्रिया व अव्यय',
+        promptHindi: 'अनुच्छेद में से कोई एक अव्यय / क्रियाविशेषण शब्द चुनें और उसका सटीक भेद बताएँ:',
+        promptEnglish: 'Click and select any Avyay (Indeclinable) word from the paragraph below:',
+        paragraphTitleHindi: 'परिश्रम का मार्ग',
+        paragraphSentences: [
+          'छात्र प्रतिदिन पुस्तकालय जाकर ध्यानपूर्वक पढ़ते हैं।',
+          'यद्यपि परीक्षा कठिन थी, तथापि उन्होंने आत्मविश्वास से सभी प्रश्न हल किए।',
+          'लगातार मेहनत करने से सफलता अवश्य मिलती है।',
+        ],
+        targetWordCategory: 'avyay',
+        targetCategoryLabelHindi: 'अव्यय (अविकारी शब्द)',
+        wordAnnotations: {
+          प्रतिदिन: {
+            word: 'प्रतिदिन',
+            categoryId: 'avyay',
+            bhedHindi: 'कालवाचक क्रियाविशेषण अव्यय',
+            roleHindi: '“पढ़ते हैं” क्रिया के समय/नियमितता को दर्शा रहा है',
+          },
+          ध्यानपूर्वक: {
+            word: 'ध्यानपूर्वक',
+            categoryId: 'avyay',
+            bhedHindi: 'रीतिवाचक क्रियाविशेषण अव्यय',
+            roleHindi: 'पढ़ने की विधि/रीति बता रहा है',
+          },
+          यद्यपि: {
+            word: 'यद्यपि',
+            categoryId: 'avyay',
+            bhedHindi: 'समुच्चयबोधक अव्यय',
+            roleHindi: '“तथापि” के साथ मिलकर दो उपवाक्यों को जोड़ रहा है',
+          },
+          तथापि: {
+            word: 'तथापि',
+            categoryId: 'avyay',
+            bhedHindi: 'समुच्चयबोधक अव्यय',
+            roleHindi: 'दो उपवाक्यों के बीच विरोध/परिणाम संबंध जोड़ रहा है',
+          },
+          अवश्य: {
+            word: 'अवश्य',
+            categoryId: 'avyay',
+            bhedHindi: 'रीतिवाचक क्रियाविशेषण अव्यय',
+            roleHindi: 'क्रिया के निश्चय/अवश्यंभावी होने को दर्शा रहा है',
+          },
+        },
+        bhedOptions: [
+          { value: 'कालवाचक क्रियाविशेषण अव्यय', labelHindi: 'कालवाचक क्रियाविशेषण अव्यय' },
+          { value: 'रीतिवाचक क्रियाविशेषण अव्यय', labelHindi: 'रीतिवाचक क्रियाविशेषण अव्यय' },
+          { value: 'समुच्चयबोधक अव्यय', labelHindi: 'समुच्चयबोधक अव्यय' },
+          { value: 'संबंधबोधक अव्यय', labelHindi: 'संबंधबोधक अव्यय' },
+        ],
+        roleOptions: [
+          { value: '“पढ़ते हैं” क्रिया के समय/नियमितता को दर्शा रहा है', labelHindi: 'क्रिया के समय/नियमितता को दर्शा रहा है' },
+          { value: 'पढ़ने की विधि/रीति बता रहा है', labelHindi: 'क्रिया की विधि/रीति बता रहा है' },
+          { value: '“तथापि” के साथ मिलकर दो उपवाक्यों को जोड़ रहा है', labelHindi: 'दो उपवाक्यों को जोड़ने का कार्य कर रहा है' },
+          { value: 'क्रिया के निश्चय/अवश्यंभावी होने को दर्शा रहा है', labelHindi: 'क्रिया के निश्चय का बोध करा रहा है' },
+          { value: 'संज्ञा या सर्वनाम के लिंग-वचन बदल रहा है', labelHindi: 'संज्ञा या सर्वनाम के रूप बदल रहा है' },
+        ],
+        explanationHindi:
+          '“प्रतिदिन” (कालवाचक), “ध्यानपूर्वक” व “अवश्य” (रीतिवाचक) तथा “यद्यपि–तथापि” (समुच्चयबोधक) लिंग-वचन से अपरिवर्तित रहने वाले अविकारी अव्यय शब्द हैं।',
+        explanationEnglish:
+          '"प्रतिदिन", "ध्यानपूर्वक", "अवश्य", "यद्यपि", and "तथापि" are invariable Avyay words.',
+      },
+      {
+        id: 'para_s_mishrit_master',
+        mode: 'sentence',
+        topicId: 'vakya',
+        topicNameHindi: 'वाक्य-भेद',
+        promptHindi: 'अनुच्छेद पर क्लिक करके “मिश्र वाक्य (Complex Sentence)” चुनें और उसका भेद स्पष्ट करें:',
+        promptEnglish: 'Select the "Complex Sentence (मिश्र वाक्य)" from the paragraph below:',
+        paragraphTitleHindi: 'परिश्रम का मार्ग',
+        paragraphSentences: [
+          'छात्र प्रतिदिन पुस्तकालय जाकर ध्यानपूर्वक पढ़ते हैं।',
+          'यद्यपि परीक्षा कठिन थी, तथापि उन्होंने आत्मविश्वास से सभी प्रश्न हल किए।',
+          'लगातार मेहनत करने से सफलता अवश्य मिलती है।',
+        ],
+        targetSentenceBhed: 'mishrit',
+        targetSentenceBhedLabelHindi: 'मिश्र वाक्य',
+        sentenceAnnotations: [
+          {
+            sentenceIndex: 0,
+            bhedType: 'saral',
+            bhedHindi: 'सरल वाक्य',
+            roleHindi: 'एक ही कर्ता “छात्र” तथा एक मुख्य समापिका क्रिया “पढ़ते हैं” है',
+          },
+          {
+            sentenceIndex: 1,
+            bhedType: 'mishrit',
+            bhedHindi: 'मिश्र वाक्य',
+            roleHindi: '“यद्यपि...तथापि” व्यधिकरण योजक द्वारा आश्रित व मुख्य उपवाक्य जुड़े हैं',
+          },
+          {
+            sentenceIndex: 2,
+            bhedType: 'saral',
+            bhedHindi: 'सरल वाक्य',
+            roleHindi: 'केवल एक मुख्य उद्देश्य और एक समापिका क्रिया “मिलती है” है',
+          },
+        ],
+        bhedOptions: [
+          { value: 'सरल वाक्य', labelHindi: 'सरल वाक्य (Simple Sentence)' },
+          { value: 'संयुक्त वाक्य', labelHindi: 'संयुक्त वाक्य (Compound Sentence)' },
+          { value: 'मिश्र वाक्य', labelHindi: 'मिश्र वाक्य (Complex Sentence)' },
+          { value: 'निषेधवाचक वाक्य', labelHindi: 'निषेधवाचक वाक्य (Negative)' },
+        ],
+        roleOptions: [
+          { value: 'एक ही कर्ता “छात्र” तथा एक मुख्य समापिका क्रिया “पढ़ते हैं” है', labelHindi: 'एक कर्ता और एक मुख्य समापिका क्रिया है' },
+          { value: '“यद्यपि...तथापि” व्यधिकरण योजक द्वारा आश्रित व मुख्य उपवाक्य जुड़े हैं', labelHindi: '“यद्यपि...तथापि” से आश्रित व मुख्य उपवाक्य जुड़े हैं' },
+          { value: 'केवल एक मुख्य उद्देश्य और एक समापिका क्रिया “मिलती है” है', labelHindi: 'केवल एक मुख्य उद्देश्य और एक क्रिया है' },
+        ],
+        explanationHindi:
+          'दूसरा वाक्य (“यद्यपि परीक्षा कठिन थी, तथापि उन्होंने आत्मविश्वास से सभी प्रश्न हल किए।”) मिश्र वाक्य है।',
+        explanationEnglish:
+          'Sentence 2 is a Complex Sentence (मिश्र वाक्य) linked by "यद्यपि...तथापि".',
+      },
+    ],
+  },
+];

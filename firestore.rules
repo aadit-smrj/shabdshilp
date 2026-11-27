@@ -1,0 +1,378 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== GLOBAL HELPERS ====================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn()
+        && ('email_verified' in request.auth.token)
+        && request.auth.token.email_verified == true
+        && ('email' in request.auth.token)
+        && request.auth.token.email is string;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+
+    function isBootstrappedAdminEmail() {
+      return isVerified() && (
+        request.auth.token.email.lower() == 'coolneha248@gmail.com' ||
+        request.auth.token.email.lower() == 'aaditverma18@gmail.com'
+      );
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdminEmail() || (
+        isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isTeacherEmail() {
+      return isVerified() && (
+        request.auth.token.email.lower().matches('.*(\\.1|_1|teacher|shikshak).*') ||
+        request.auth.token.email.lower().matches('^kiran.*')
+      );
+    }
+
+    function isTeacherOrAdmin() {
+      return isAdmin() || isTeacherEmail();
+    }
+
+    // ==================== VALIDATION BLUEPRINTS ====================
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'userName', 'grade', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'userName', 'grade', 'section', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.email.lower() == request.auth.token.email.lower()
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 100
+        && data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 30
+        && (!('section' in data) || (data.section is string && data.section.size() <= 30))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCustomWorksheet(data) {
+      return data.keys().hasAll([
+          'id', 'uid', 'titleHindi', 'topicId', 'grade', 'difficulty', 'questionCount', 'questions', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'uid', 'titleHindi', 'titleEnglish', 'topicId', 'topicNameHindi',
+          'grade', 'board', 'difficulty', 'difficultyLabelHindi', 'questionCount',
+          'createdAt', 'questions', 'instructionsHindi', 'instructionsEnglish', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.uid is string && data.uid == request.auth.uid
+        && data.titleHindi is string && data.titleHindi.size() >= 1 && data.titleHindi.size() <= 200
+        && (!('titleEnglish' in data) || (data.titleEnglish is string && data.titleEnglish.size() <= 200))
+        && data.topicId is string && data.topicId.size() >= 1 && data.topicId.size() <= 64
+        && (!('topicNameHindi' in data) || (data.topicNameHindi is string && data.topicNameHindi.size() <= 120))
+        && data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 30
+        && (!('board' in data) || (data.board is string && data.board.size() <= 20))
+        && data.difficulty is string && data.difficulty in ['easy', 'medium', 'hard', 'board_level']
+        && (!('difficultyLabelHindi' in data) || (data.difficultyLabelHindi is string && data.difficultyLabelHindi.size() <= 100))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 100))
+        && data.questionCount is number && data.questionCount >= 1 && data.questionCount <= 50
+        && data.questions is list && data.questions.size() >= 1 && data.questions.size() <= 50
+        && data.questions[0] is map
+        && (!('instructionsHindi' in data) || (data.instructionsHindi is list && data.instructionsHindi.size() <= 10 && (data.instructionsHindi.size() == 0 || data.instructionsHindi[0] is string)))
+        && (!('instructionsEnglish' in data) || (data.instructionsEnglish is list && data.instructionsEnglish.size() <= 10 && (data.instructionsEnglish.size() == 0 || data.instructionsEnglish[0] is string)))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidUserProgress(data) {
+      return data.keys().hasAll(['uid', 'email', 'progress', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'progress', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.email.lower() == request.auth.token.email.lower()
+        && data.progress is map && data.progress.size() <= 50
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTeacherProfile(data) {
+      return data.keys().hasAll(['uid', 'teacherEmail', 'worksheets', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'teacherEmail', 'worksheets', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 150
+        && data.teacherEmail.lower() == request.auth.token.email.lower()
+        && data.worksheets is list && data.worksheets.size() <= 100
+        && (data.worksheets.size() == 0 || data.worksheets[0] is map)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTeacherWorksheetsStore(data) {
+      return data.keys().hasAll(['worksheets', 'updatedAt'])
+        && data.keys().hasOnly(['worksheets', 'updatedAt'])
+        && data.worksheets is list && data.worksheets.size() <= 200
+        && (data.worksheets.size() == 0 || data.worksheets[0] is map)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidStudentSubmission(data) {
+      return data.keys().hasAll([
+          'id', 'worksheetId', 'studentUid', 'studentEmail', 'studentName',
+          'grade', 'score', 'maxScore', 'percentage', 'attemptedAt', 'answers', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'worksheetId', 'teacherEmail', 'studentUid', 'studentEmail', 'studentName',
+          'grade', 'score', 'maxScore', 'percentage', 'attemptedAt', 'answers', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.worksheetId)
+        && data.studentUid is string && data.studentUid == request.auth.uid
+        && data.studentEmail is string && data.studentEmail.size() >= 3 && data.studentEmail.size() <= 150
+        && data.studentEmail.lower() == request.auth.token.email.lower()
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 100
+        && data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 30
+        && (!('teacherEmail' in data) || (data.teacherEmail is string && data.teacherEmail.size() <= 150))
+        && data.score is number && data.score >= 0 && data.score <= 1000
+        && data.maxScore is number && data.maxScore >= 1 && data.maxScore <= 1000
+        && data.percentage is number && data.percentage >= 0 && data.percentage <= 100
+        && data.attemptedAt is string && data.attemptedAt.size() >= 1 && data.attemptedAt.size() <= 100
+        && data.answers is map && data.answers.size() <= 100
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCreativeHomework(data) {
+      return data.keys().hasAll([
+          'id', 'teacherUid', 'teacherEmail', 'teacherName', 'genreId',
+          'titleHindi', 'instructionsHindi', 'wordLimit', 'dueDate', 'grade', 'isActive', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'teacherUid', 'teacherEmail', 'teacherName', 'genreId',
+          'titleHindi', 'instructionsHindi', 'wordLimit', 'dueDate', 'grade',
+          'section', 'createdAt', 'isActive', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.teacherUid is string && data.teacherUid == request.auth.uid
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 150
+        && data.teacherEmail.lower() == request.auth.token.email.lower()
+        && data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 100
+        && data.genreId is string && data.genreId.size() >= 1 && data.genreId.size() <= 40
+        && data.titleHindi is string && data.titleHindi.size() >= 1 && data.titleHindi.size() <= 200
+        && data.instructionsHindi is string && data.instructionsHindi.size() >= 1 && data.instructionsHindi.size() <= 1200
+        && data.wordLimit is number && data.wordLimit >= 10 && data.wordLimit <= 1000
+        && data.dueDate is string && data.dueDate.size() >= 1 && data.dueDate.size() <= 40
+        && data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 30
+        && (!('section' in data) || (data.section is string && data.section.size() <= 40))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 60))
+        && data.isActive is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCreativeSubmission(data) {
+      return data.keys().hasAll([
+          'id', 'studentUid', 'studentEmail', 'studentName', 'grade', 'genreId',
+          'titleHindi', 'submissionMode', 'transcribedText', 'overallScore',
+          'rubricScores', 'grammarErrors', 'feedbackHindi', 'status',
+          'coinsAwarded', 'submittedAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'homeworkId', 'teacherEmail', 'studentUid', 'studentEmail', 'studentName',
+          'grade', 'section', 'genreId', 'titleHindi', 'submissionMode', 'fileName', 'mimeType',
+          'transcribedText', 'overallScore', 'rubricScores', 'grammarErrors', 'structureFeedback',
+          'vocabularySuggestions', 'feedbackHindi', 'feedbackEnglish', 'status', 'teacherRemarks',
+          'coinsAwarded', 'submittedAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && (!('homeworkId' in data) || (data.homeworkId is string && data.homeworkId.size() <= 128))
+        && (!('teacherEmail' in data) || (data.teacherEmail is string && data.teacherEmail.size() <= 150))
+        && data.studentUid is string && data.studentUid.size() >= 1 && data.studentUid.size() <= 128
+        && data.studentEmail is string && data.studentEmail.size() >= 3 && data.studentEmail.size() <= 150
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 100
+        && data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 30
+        && (!('section' in data) || (data.section is string && data.section.size() <= 40))
+        && data.genreId is string && data.genreId.size() >= 1 && data.genreId.size() <= 40
+        && data.titleHindi is string && data.titleHindi.size() >= 1 && data.titleHindi.size() <= 200
+        && data.submissionMode is string && data.submissionMode in ['typed', 'handwritten']
+        && (!('fileName' in data) || (data.fileName is string && data.fileName.size() <= 150))
+        && (!('mimeType' in data) || (data.mimeType is string && data.mimeType.size() <= 60))
+        && data.transcribedText is string && data.transcribedText.size() >= 1 && data.transcribedText.size() <= 8000
+        && data.overallScore is number && data.overallScore >= 0 && data.overallScore <= 100
+        && data.rubricScores is map && data.rubricScores.size() <= 10
+        && data.grammarErrors is list && data.grammarErrors.size() <= 20
+        && (!('structureFeedback' in data) || (data.structureFeedback is string && data.structureFeedback.size() <= 1500))
+        && (!('vocabularySuggestions' in data) || (data.vocabularySuggestions is list && data.vocabularySuggestions.size() <= 20))
+        && data.feedbackHindi is string && data.feedbackHindi.size() <= 2000
+        && (!('feedbackEnglish' in data) || (data.feedbackEnglish is string && data.feedbackEnglish.size() <= 2000))
+        && data.status is string && data.status in ['Submitted', 'Reviewed']
+        && (!('teacherRemarks' in data) || (data.teacherRemarks is string && data.teacherRemarks.size() <= 1000))
+        && data.coinsAwarded is number && data.coinsAwarded >= 0 && data.coinsAwarded <= 50
+        && data.submittedAt is string && data.submittedAt.size() <= 60
+        && data.updatedAt == request.time;
+    }
+
+    // ==================== COLLECTION RULES ====================
+
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isOwner(adminId) && isValidId(adminId);
+      allow list, write: if false;
+    }
+
+    // 1. User Profiles (PII isolated strictly to owner or admin)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isValidUserProfile(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && isValidUserProfile(incoming()) && (
+        isAdmin() ||
+        (isOwner(userId)
+          && incoming().uid == existing().uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['userName', 'grade', 'section', 'email', 'updatedAt']))
+      );
+      allow delete: if false;
+
+      // 1b. User-Owned Saved Custom Worksheets (Master Gate checks parent /users/{userId})
+      match /customWorksheets/{worksheetId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(worksheetId)
+          && (isOwner(userId) || isAdmin())
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+        allow list: if isSignedIn() && isVerified() && (
+          (request.auth.uid == userId && resource.data.uid == request.auth.uid) || isBootstrappedAdminEmail()
+        );
+        allow create: if isSignedIn() && isValidId(userId) && isValidId(worksheetId)
+          && isOwner(userId)
+          && isValidCustomWorksheet(incoming())
+          && incoming().id == worksheetId
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+        allow update: if isSignedIn() && isValidId(userId) && isValidId(worksheetId)
+          && isValidCustomWorksheet(incoming())
+          && (
+            isAdmin() ||
+            (isOwner(userId)
+              && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+              && incoming().uid == existing().uid
+              && incoming().id == existing().id
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'titleHindi', 'titleEnglish', 'difficulty', 'difficultyLabelHindi', 'questions', 'questionCount', 'updatedAt'
+              ]))
+          );
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(worksheetId)
+          && (isOwner(userId) || isAdmin())
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+      }
+    }
+
+    // 2. User Progress (strictly owner or admin)
+    match /userProgress/{userProgressId} {
+      allow get: if isSignedIn() && isValidId(userProgressId) && (isOwner(userProgressId) || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(userProgressId) && isOwner(userProgressId) && isValidUserProgress(incoming());
+      allow update: if isSignedIn() && isValidId(userProgressId) && isValidUserProgress(incoming()) && (
+        isAdmin() ||
+        (isOwner(userProgressId)
+          && incoming().uid == existing().uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['progress', 'email', 'updatedAt']))
+      );
+      allow delete: if false;
+    }
+
+    // 3. Teacher Personal Profiles & Worksheets (strictly owner teacher or admin)
+    match /teachers/{teacherId} {
+      allow get: if isSignedIn() && isValidId(teacherId) && (isOwner(teacherId) || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(teacherId) && isOwner(teacherId) && isTeacherOrAdmin() && isValidTeacherProfile(incoming());
+      allow update: if isSignedIn() && isValidId(teacherId) && isValidTeacherProfile(incoming()) && (
+        isAdmin() ||
+        (isOwner(teacherId) && isTeacherOrAdmin()
+          && incoming().uid == existing().uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['worksheets', 'teacherEmail', 'updatedAt']))
+      );
+      allow delete: if false;
+    }
+
+    // 4. Shared Classroom Active Worksheets Catalog (singleton doc: teacherWorksheets)
+    match /appStore/{docId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(docId) && docId == 'teacherWorksheets';
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(docId) && docId == 'teacherWorksheets'
+        && isTeacherOrAdmin() && isValidTeacherWorksheetsStore(incoming());
+      allow update: if isSignedIn() && isValidId(docId) && docId == 'teacherWorksheets'
+        && isValidTeacherWorksheetsStore(incoming())
+        && isTeacherOrAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly(['worksheets', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // 5. Individual Student Worksheet Submissions (PII isolated per student + visible to teachers/admins; locked after submit)
+    match /submissions/{submissionId} {
+      allow get: if isSignedIn() && isValidId(submissionId) && isVerified() && (
+        existing().studentUid == request.auth.uid || isTeacherOrAdmin()
+      );
+      allow list: if isSignedIn() && isVerified() && (
+        resource.data.studentUid == request.auth.uid || isTeacherEmail() || isBootstrappedAdminEmail()
+      );
+      allow create: if isSignedIn() && isVerified() && isValidId(submissionId)
+        && isValidStudentSubmission(incoming())
+        && incoming().id == submissionId;
+      allow update: if isSignedIn() && isVerified() && isValidId(submissionId)
+        && isValidStudentSubmission(incoming())
+        && isAdmin();
+      allow delete: if false;
+    }
+
+    // 6. Teacher-Assigned Creative Writing Homeworks (readable by verified users; writable by teacher owner/admin)
+    match /creativeHomeworks/{homeworkId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(homeworkId);
+      allow list: if isSignedIn() && isVerified();
+      allow create: if isSignedIn() && isVerified() && isValidId(homeworkId)
+        && isTeacherOrAdmin()
+        && isValidCreativeHomework(incoming())
+        && incoming().id == homeworkId;
+      allow update: if isSignedIn() && isVerified() && isValidId(homeworkId)
+        && isTeacherOrAdmin()
+        && isValidCreativeHomework(incoming())
+        && (isAdmin() || existing().teacherUid == request.auth.uid)
+        && incoming().id == existing().id
+        && incoming().teacherUid == existing().teacherUid;
+      allow delete: if isSignedIn() && isVerified() && isValidId(homeworkId)
+        && isTeacherOrAdmin()
+        && (isAdmin() || existing().teacherUid == request.auth.uid);
+    }
+
+    // 7. Student Creative Writing / Handwritten Submissions (student owner creates & reads own; teacher reads & reviews)
+    match /creativeSubmissions/{submissionId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(submissionId) && (
+        existing().studentUid == request.auth.uid || isTeacherOrAdmin()
+      );
+      allow list: if isSignedIn() && isVerified() && (
+        resource.data.studentUid == request.auth.uid || isTeacherEmail() || isBootstrappedAdminEmail()
+      );
+      allow create: if isSignedIn() && isVerified() && isValidId(submissionId)
+        && isValidCreativeSubmission(incoming())
+        && incoming().id == submissionId
+        && incoming().studentUid == request.auth.uid
+        && incoming().studentEmail.lower() == request.auth.token.email.lower()
+        && incoming().status == 'Submitted';
+      allow update: if isSignedIn() && isVerified() && isValidId(submissionId)
+        && isTeacherOrAdmin()
+        && isValidCreativeSubmission(incoming())
+        && incoming().id == existing().id
+        && incoming().studentUid == existing().studentUid
+        && incoming().studentEmail == existing().studentEmail
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'teacherRemarks', 'updatedAt']);
+      allow delete: if false;
+    }
+  }
+}

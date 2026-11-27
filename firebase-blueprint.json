@@ -1,0 +1,206 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile stored in Firestore",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "userName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "section": { "type": "string", "maxLength": 30 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "userName", "grade", "updatedAt"]
+    },
+    "CustomWorksheet": {
+      "title": "CustomWorksheet",
+      "description": "A student-saved custom practice worksheet stored under the user's profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "titleHindi": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "titleEnglish": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "topicId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "topicNameHindi": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "board": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard", "board_level"] },
+        "difficultyLabelHindi": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "questionCount": { "type": "number" },
+        "createdAt": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "questions": { "type": "array" },
+        "instructionsHindi": { "type": "array" },
+        "instructionsEnglish": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "titleHindi", "topicId", "grade", "difficulty", "questionCount", "questions", "updatedAt"]
+    },
+    "TeacherWorksheet": {
+      "title": "TeacherWorksheet",
+      "description": "A worksheet generated or uploaded by a teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "teacherName": { "type": "string", "maxLength": 100 },
+        "titleHindi": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "topic": { "type": "string", "maxLength": 120 },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "section": { "type": "string", "maxLength": 40 },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+        "questions": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "titleHindi", "grade", "questions", "isActive"]
+    },
+    "StudentSubmission": {
+      "title": "StudentSubmission",
+      "description": "A student's completed worksheet submission with marks",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "worksheetId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherEmail": { "type": "string", "maxLength": 150 },
+        "studentUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentEmail": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "studentName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "score": { "type": "number" },
+        "maxScore": { "type": "number" },
+        "percentage": { "type": "number" },
+        "attemptedAt": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "answers": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "worksheetId", "studentUid", "studentEmail", "studentName", "grade", "score", "maxScore", "percentage", "attemptedAt", "answers", "updatedAt"]
+    },
+    "AppStore": {
+      "title": "AppStore",
+      "description": "Global synchronized active teacher worksheets catalog",
+      "type": "object",
+      "properties": {
+        "worksheets": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["worksheets", "updatedAt"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Student gamification and learning progress",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "progress": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "progress", "updatedAt"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Teacher profile and their created worksheets",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherEmail": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "worksheets": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "teacherEmail", "worksheets", "updatedAt"]
+    },
+    "CreativeHomework": {
+      "title": "CreativeHomework",
+      "description": "Teacher-assigned creative writing homework topic",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherEmail": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "teacherName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "genreId": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "titleHindi": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "instructionsHindi": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "wordLimit": { "type": "number" },
+        "dueDate": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "section": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "maxLength": 60 },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherUid", "teacherEmail", "teacherName", "genreId", "titleHindi", "instructionsHindi", "wordLimit", "dueDate", "grade", "isActive", "updatedAt"]
+    },
+    "CreativeSubmission": {
+      "title": "CreativeSubmission",
+      "description": "Student typed or handwritten OCR creative writing submission and AI review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "homeworkId": { "type": "string", "maxLength": 128 },
+        "teacherEmail": { "type": "string", "maxLength": 150 },
+        "studentUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentEmail": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "studentName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "section": { "type": "string", "maxLength": 40 },
+        "genreId": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "titleHindi": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "submissionMode": { "type": "string", "enum": ["typed", "handwritten"] },
+        "fileName": { "type": "string", "maxLength": 150 },
+        "mimeType": { "type": "string", "maxLength": 60 },
+        "transcribedText": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "overallScore": { "type": "number" },
+        "rubricScores": { "type": "object" },
+        "grammarErrors": { "type": "array" },
+        "structureFeedback": { "type": "string", "maxLength": 1500 },
+        "vocabularySuggestions": { "type": "array" },
+        "feedbackHindi": { "type": "string", "maxLength": 2000 },
+        "feedbackEnglish": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["Submitted", "Reviewed"] },
+        "teacherRemarks": { "type": "string", "maxLength": 1000 },
+        "coinsAwarded": { "type": "number" },
+        "submittedAt": { "type": "string", "maxLength": 60 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentUid", "studentEmail", "studentName", "grade", "genreId", "titleHindi", "submissionMode", "transcribedText", "overallScore", "rubricScores", "grammarErrors", "feedbackHindi", "status", "coinsAwarded", "submittedAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user profile state"
+    },
+    "/users/{userId}/customWorksheets/{worksheetId}": {
+      "schema": { "$ref": "#/entities/CustomWorksheet" },
+      "description": "User-owned saved custom practice worksheets gated by parent /users/{userId}"
+    },
+    "/userProgress/{userProgressId}": {
+      "schema": { "$ref": "#/entities/UserProgress" },
+      "description": "Owner-isolated student progress data"
+    },
+    "/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/TeacherProfile" },
+      "description": "Teacher-specific uploaded worksheets"
+    },
+    "/appStore/{docId}": {
+      "schema": { "$ref": "#/entities/AppStore" },
+      "description": "Synchronized active teacher worksheets catalog (docId: teacherWorksheets)"
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/StudentSubmission" },
+      "description": "Individual student worksheet submissions isolated per student and readable by teachers"
+    },
+    "/creativeHomeworks/{homeworkId}": {
+      "schema": { "$ref": "#/entities/CreativeHomework" },
+      "description": "Teacher-assigned creative writing homeworks readable by verified students"
+    },
+    "/creativeSubmissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/CreativeSubmission" },
+      "description": "Student creative writing / handwritten OCR submissions isolated per student and reviewable by teachers"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "ShabdShilp - Hindi Grammar (24/11/26)",
+  "description": "Interactive Hindi Vyakaran operating system with adaptive learning, Time Travel progress tracker, Upsarg-Pratyay builder, Story Builder with Hinglish typing, Apathit Gadyansh comprehension, and WordCoins gamification.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
