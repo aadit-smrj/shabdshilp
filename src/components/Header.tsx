@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Maximize2,
   Minimize2,
+  FileBarChart2,
 } from 'lucide-react';
 import { BoardType, GradeLevel } from '../types';
 import { AppTheme, THEMES_LIST, getThemeConfig } from '../utils/theme';
@@ -82,6 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'gadyansh', labelHindi: 'अपठित गद्यांश', labelEnglish: 'Comprehension', icon: BookOpen },
         { id: 'story-builder', labelHindi: 'कथा शिल्पी AI', labelEnglish: 'ICSE Writing Studio', icon: PenTool },
         { id: 'worksheets', labelHindi: 'वर्कशीट्स स्टोर', labelEnglish: 'Worksheets', icon: Award },
+        { id: 'reports', labelHindi: 'प्रगति रिपोर्ट्स', labelEnglish: 'Reports', icon: FileBarChart2 },
       ];
 
   const activeNavItem = navItems.find((item) => item.id === currentTab) || navItems[0];

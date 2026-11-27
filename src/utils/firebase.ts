@@ -29,9 +29,44 @@ import {
   serverTimestamp,
   setLogLevel,
 } from 'firebase/firestore';
-import config from '../../firebase-applet-config.json';
+import appletConfig from '../../firebase-applet-config.json';
 
 setLogLevel('silent');
+
+const envProjectId = (import.meta.env.VITE_FIREBASE_PROJECT_ID || '').trim();
+const envApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
+const envAuthDomain = (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim();
+const envAppId = (import.meta.env.VITE_FIREBASE_APP_ID || '').trim();
+const envStorageBucket = (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim();
+const envMessagingSenderId = (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim();
+const envMeasurementId = (import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || '').trim();
+const envDatabaseId = (import.meta.env.VITE_FIREBASE_DATABASE_ID || '').trim();
+
+const isOverridingProject = Boolean(envProjectId && envProjectId !== appletConfig.projectId);
+
+export const activeFirebaseConfig = {
+  ...appletConfig,
+  ...(envApiKey ? { apiKey: envApiKey } : {}),
+  ...(envAuthDomain
+    ? { authDomain: envAuthDomain }
+    : isOverridingProject
+    ? { authDomain: `${envProjectId}.firebaseapp.com` }
+    : {}),
+  ...(envProjectId ? { projectId: envProjectId } : {}),
+  ...(envStorageBucket
+    ? { storageBucket: envStorageBucket }
+    : isOverridingProject
+    ? { storageBucket: `${envProjectId}.firebasestorage.app` }
+    : {}),
+  ...(envMessagingSenderId ? { messagingSenderId: envMessagingSenderId } : {}),
+  ...(envAppId ? { appId: envAppId } : {}),
+  ...(envMeasurementId ? { measurementId: envMeasurementId } : {}),
+  firestoreDatabaseId: envDatabaseId
+    ? envDatabaseId
+    : isOverridingProject
+    ? '(default)'
+    : appletConfig.firestoreDatabaseId || '(default)',
+};
 
 let app: any = null;
 let authObj: any = null;
@@ -39,7 +74,7 @@ let dbObj: any = null;
 let googleProviderObj: any = null;
 
 try {
-  app = initializeApp(config);
+  app = initializeApp(activeFirebaseConfig);
   try {
     // Enforce in-memory auth persistence so every fresh app/link open prompts the login screen
     authObj = initializeAuth(app, {
@@ -52,17 +87,15 @@ try {
     authObj = getAuth(app);
     setPersistence(authObj, inMemoryPersistence).catch(() => {});
   }
+  const firestoreDbId = activeFirebaseConfig.firestoreDatabaseId?.trim();
+  const isNamedDatabase = Boolean(firestoreDbId && firestoreDbId !== '(default)');
   try {
     // Use long-polling so WebChannel HTTP/2 stream proxies/iframes never stall into false "client is offline" states
-    dbObj = initializeFirestore(
-      app,
-      {
-        experimentalForceLongPolling: true,
-      },
-      config.firestoreDatabaseId
-    );
+    dbObj = isNamedDatabase
+      ? initializeFirestore(app, { experimentalForceLongPolling: true }, firestoreDbId)
+      : initializeFirestore(app, { experimentalForceLongPolling: true });
   } catch (_alreadyInitFirestoreErr) {
-    dbObj = getFirestore(app, config.firestoreDatabaseId);
+    dbObj = isNamedDatabase ? getFirestore(app, firestoreDbId) : getFirestore(app);
   }
   if (dbObj) {
     enableNetwork(dbObj).catch(() => {});

@@ -314,6 +314,9 @@ export interface WorkbookAttemptRecord {
   paraSelectTotal: number;
   paraBhedCorrect: number;
   paraBhedTotal: number;
+  shortCorrect?: number;
+  shortTotal?: number;
+  creativeScore?: number;
   overallScore: number;
   overallMax: number;
   percentage: number;
@@ -417,6 +420,16 @@ export interface InteractiveParagraphQuestion {
   explanationEnglish: string;
 }
 
+export interface InteractiveWorkbookCreativePrompt {
+  genreId: 'anuched' | 'patra' | 'katha';
+  genreLabelHindi: string;
+  titleHindi: string;
+  instructionsHindi: string;
+  instructionsEnglish: string;
+  wordLimit: number;
+  hintsHindi: string[];
+}
+
 export interface InteractiveWorkbookDefinition {
   id: string;
   titleHindi: string;
@@ -427,8 +440,11 @@ export interface InteractiveWorkbookDefinition {
   costWordCoins: number;
   requiredLessonModuleIds: string[]; // e.g., ['sangya', 'sarvanam'] or ['karak', 'kriya']
   minCompletionsPerRequiredLesson: number;
+  trackedTopicNames?: string[];
   mcqQuestions: QuizQuestion[];
   paragraphQuestions: InteractiveParagraphQuestion[];
+  shortQuestions?: ComprehensionShortQuestion[];
+  creativeWritingPrompt?: InteractiveWorkbookCreativePrompt;
 }
 
 export interface TeacherWorksheet {

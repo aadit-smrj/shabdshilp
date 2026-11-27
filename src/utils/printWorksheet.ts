@@ -664,6 +664,11 @@ export function printWorksheetDocument(ws: PrintableWorksheetInput): void {
   );
 }
 
+export function downloadWorksheetDocument(ws: PrintableWorksheetInput): void {
+  const html = buildWorksheetHtmlDocument(ws);
+  downloadPrintableHtml(html, ws.titleHindi || 'shabdshilp-worksheet');
+}
+
 export function printTeacherWorksheetItem(ws: TeacherWorksheet, includeEnglish = false): void {
   printWorksheetDocument({
     titleHindi: ws.titleHindi,
@@ -1090,5 +1095,450 @@ export function downloadChapterCheatNotes(
 ): void {
   const html = buildChapterCheatNotesHtml(note, meta);
   downloadPrintableHtml(html, `${note.chapterTitleHindi}-Notes`);
+}
+
+export interface FullPortfolioReportInput {
+  studentInfo?: { userName?: string; email?: string; grade?: string; board?: string };
+  simulationSummaryRows: Array<{
+    titleHindi: string;
+    completions: number;
+    avgAccuracyPct: number | null;
+  }>;
+  workbookSummary: {
+    attempts: number;
+    mcqPct: number;
+    selectPct: number;
+    bhedPct: number;
+    rows: Array<{
+      titleHindi: string;
+      mcqLabel: string;
+      selectLabel: string;
+      bhedLabel: string;
+      percentage: number;
+    }>;
+  };
+  creativePortfolio: Array<{
+    titleHindi: string;
+    submissionMode: string;
+    status: string;
+    overallScore: number;
+    submittedAt: string;
+  }>;
+  savedReports: Array<{
+    titleHindi: string;
+    date: string;
+    grade?: string;
+    score: number;
+    maxScore: number;
+    attemptedCount?: number;
+    unansweredCount?: number;
+    percentage: number;
+    wordCoinsEarned: number;
+    weakAreasHindi: string[];
+    strongAreasHindi: string[];
+    adviceSummaryHindi?: string;
+  }>;
+  weakRecoveryTopics?: string[];
+}
+
+export function buildFullStudentPortfolioReportHtml(input: FullPortfolioReportInput): {
+  title: string;
+  html: string;
+} {
+  const brandLogosHtml = getPrintBrandLogosHtml(46);
+  const title = `संपूर्ण विद्यार्थी प्रगति रिपोर्ट (${input.studentInfo?.grade || 'ICSE'})`;
+
+  const simRowsHtml = input.simulationSummaryRows
+    .map(
+      (r) => `
+      <tr>
+        <td><strong>${escapePrintHtml(r.titleHindi)}</strong></td>
+        <td style="text-align:center;">${r.completions} बार</td>
+        <td style="text-align:center;">${r.completions > 0 && r.avgAccuracyPct !== null ? `${r.avgAccuracyPct}%` : '—'}</td>
+      </tr>`
+    )
+    .join('');
+
+  const wbRowsHtml =
+    input.workbookSummary.rows.length > 0
+      ? `
+      <div class="ss-kpis">
+        <div class="ss-kpi"><span class="ss-kpi-label">कुल प्रयास</span><span class="ss-kpi-val">${input.workbookSummary.attempts}</span></div>
+        <div class="ss-kpi"><span class="ss-kpi-label">MCQ सटीकता</span><span class="ss-kpi-val">${input.workbookSummary.mcqPct}%</span></div>
+        <div class="ss-kpi"><span class="ss-kpi-label">अनुच्छेद चयन</span><span class="ss-kpi-val">${input.workbookSummary.selectPct}%</span></div>
+        <div class="ss-kpi"><span class="ss-kpi-label">भेद पहचान</span><span class="ss-kpi-val">${input.workbookSummary.bhedPct}%</span></div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>अभ्यास पुस्तिका</th><th>MCQ</th><th>चयन</th><th>भेद पहचान</th><th>समग्र %</th></tr>
+        </thead>
+        <tbody>
+          ${input.workbookSummary.rows
+            .map(
+              (r) => `
+            <tr>
+              <td><strong>${escapePrintHtml(r.titleHindi)}</strong></td>
+              <td>${escapePrintHtml(r.mcqLabel)}</td>
+              <td>${escapePrintHtml(r.selectLabel)}</td>
+              <td>${escapePrintHtml(r.bhedLabel)}</td>
+              <td><strong>${r.percentage}%</strong></td>
+            </tr>`
+            )
+            .join('')}
+        </tbody>
+      </table>`
+      : `<p class="ss-empty">अभी तक कोई अभ्यास पुस्तिका हल नहीं की गई है।</p>`;
+
+  const creativeRowsHtml =
+    input.creativePortfolio.length > 0
+      ? `
+      <table>
+        <thead>
+          <tr><th>रचना शीर्षक</th><th>माध्यम</th><th>स्थिति</th><th>अंक</th><th>दिनांक</th></tr>
+        </thead>
+        <tbody>
+          ${input.creativePortfolio
+            .map(
+              (c) => `
+            <tr>
+              <td><strong>${escapePrintHtml(c.titleHindi)}</strong></td>
+              <td>${c.submissionMode === 'handwritten' ? 'हस्तलिखित OCR' : 'टाइप'}</td>
+              <td>${escapePrintHtml(c.status)}</td>
+              <td><strong>${c.overallScore}/100</strong></td>
+              <td>${escapePrintHtml(new Date(c.submittedAt).toLocaleDateString('hi-IN'))}</td>
+            </tr>`
+            )
+            .join('')}
+        </tbody>
+      </table>`
+      : `<p class="ss-empty">अभी तक कोई रचनात्मक लेखन सबमिशन दर्ज नहीं है।</p>`;
+
+  const savedCardsHtml =
+    input.savedReports.length > 0
+      ? input.savedReports
+          .map(
+            (rep, idx) => `
+          <div class="ss-rep-card">
+            <div class="ss-rep-head">
+              <div>
+                <h3>${idx + 1}. ${escapePrintHtml(rep.titleHindi)}</h3>
+                <div class="ss-rep-meta">${escapePrintHtml(rep.date)}${rep.grade ? ` • ${escapePrintHtml(rep.grade)}` : ''}</div>
+              </div>
+              <div class="ss-rep-score">
+                <strong>${rep.score} / ${rep.maxScore} (${rep.percentage}%)</strong>
+                ${rep.wordCoinsEarned > 0 ? `<div class="ss-coins">+${rep.wordCoinsEarned} WordCoins</div>` : ''}
+              </div>
+            </div>
+            ${
+              rep.strongAreasHindi.length > 0
+                ? `<div class="ss-box ss-strong"><strong>मजबूत पक्ष:</strong> ${escapePrintHtml(rep.strongAreasHindi.join(', '))}</div>`
+                : ''
+            }
+            ${
+              rep.weakAreasHindi.length > 0
+                ? `<div class="ss-box ss-weak"><strong>सुधार क्षेत्र:</strong> ${escapePrintHtml(rep.weakAreasHindi.join(', '))}</div>`
+                : ''
+            }
+            ${
+              rep.adviceSummaryHindi
+                ? `<div class="ss-advice"><strong>सुझाव:</strong> ${escapePrintHtml(rep.adviceSummaryHindi)}</div>`
+                : ''
+            }
+          </div>`
+          )
+          .join('')
+      : `<p class="ss-empty">अभी तक कोई सहेजी गई अध्याय या वर्कशीट रिपोर्ट उपलब्ध नहीं है।</p>`;
+
+  const weakChipsHtml =
+    input.weakRecoveryTopics && input.weakRecoveryTopics.length > 0
+      ? `<div class="ss-box ss-weak" style="margin-bottom:14px;"><strong>रिपोर्ट से पहचाने गए त्रुटि-सुधार विषय (Mistake Recovery Focus):</strong> ${escapePrintHtml(
+          input.weakRecoveryTopics.join(' · ')
+        )}</div>`
+      : '';
+
+  const html = `<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapePrintHtml(title)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    @page { size: A4; margin: 14mm; }
+    .ss-print-doc {
+      font-family: 'Noto Sans Devanagari', 'Plus Jakarta Sans', Arial, sans-serif;
+      color: #0f172a; line-height: 1.5; margin: 0 auto; padding: 16px 20px;
+      max-width: 860px; font-size: 12px; background: #ffffff;
+    }
+    .ss-print-doc * { box-sizing: border-box; }
+    .ss-print-doc .ss-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #4338ca; padding-bottom: 10px; margin-bottom: 14px; gap: 12px; }
+    .ss-print-doc .ss-brand { display: flex; align-items: center; gap: 10px; }
+    .ss-print-doc h1 { margin: 0; font-size: 18px; color: #1e1b4b; font-weight: 800; }
+    .ss-print-doc h2 { margin: 16px 0 8px 0; font-size: 13.5px; color: #1e1b4b; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
+    .ss-print-doc .ss-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+    .ss-print-doc .ss-kpi { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; background: #f8fafc; }
+    .ss-print-doc .ss-kpi-label { font-size: 10px; color: #475569; display: block; }
+    .ss-print-doc .ss-kpi-val { font-size: 15px; font-weight: 800; color: #0f172a; }
+    .ss-print-doc table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+    .ss-print-doc th, .ss-print-doc td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+    .ss-print-doc th { background: #1e1b4b; color: #ffffff; font-weight: 700; }
+    .ss-print-doc tr { page-break-inside: avoid; break-inside: avoid; }
+    .ss-print-doc .ss-rep-card { border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; page-break-inside: avoid; break-inside: avoid; background: #f8fafc; }
+    .ss-print-doc .ss-rep-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 6px; }
+    .ss-print-doc .ss-rep-head h3 { margin: 0; font-size: 13px; color: #0f172a; }
+    .ss-print-doc .ss-rep-meta { font-size: 10.5px; color: #475569; }
+    .ss-print-doc .ss-rep-score { text-align: right; white-space: nowrap; font-size: 12.5px; color: #1e1b4b; }
+    .ss-print-doc .ss-coins { font-size: 10.5px; color: #92400e; font-weight: 700; }
+    .ss-print-doc .ss-box { padding: 6px 9px; border-radius: 6px; margin-bottom: 5px; font-size: 11px; }
+    .ss-print-doc .ss-strong { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+    .ss-print-doc .ss-weak { background: #fff1f2; border: 1px solid #fecdd3; color: #9f1239; }
+    .ss-print-doc .ss-advice { font-size: 11px; color: #334155; }
+    .ss-print-doc .ss-empty { padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; color: #475569; text-align: center; }
+    .ss-print-doc .ss-footer { margin-top: 18px; padding-top: 8px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; font-size: 10.5px; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="ss-print-doc">
+    <div class="ss-header">
+      <div class="ss-brand">
+        ${brandLogosHtml}
+        <div>
+          <h1>${escapePrintHtml(title)}</h1>
+          <div style="color:#475569; font-size:11px;">
+            ${input.studentInfo?.userName ? `विद्यार्थी: ${escapePrintHtml(input.studentInfo.userName)}` : ''}
+            ${input.studentInfo?.email ? ` (${escapePrintHtml(input.studentInfo.email)})` : ''}
+            ${input.studentInfo?.board ? ` • ${escapePrintHtml(input.studentInfo.board)}` : ''}
+          </div>
+        </div>
+      </div>
+      <div style="text-align:right; font-size:11px; white-space:nowrap;">
+        <strong>शब्दशिल्प (ShabdShilp)</strong><br />
+        <span>दिनांक: ${new Date().toLocaleDateString('hi-IN')}</span>
+      </div>
+    </div>
+
+    ${weakChipsHtml}
+
+    <h2>१. व्याकरण सिमुलेशन विषयवार प्रगति</h2>
+    <table>
+      <thead><tr><th>सिमुलेशन अध्याय</th><th style="text-align:center;">पूर्ण संख्या</th><th style="text-align:center;">औसत सटीकता</th></tr></thead>
+      <tbody>${simRowsHtml}</tbody>
+    </table>
+
+    <h2>२. अभ्यास पुस्तिका व अनुच्छेद परीक्षण विश्लेषण</h2>
+    ${wbRowsHtml}
+
+    <h2>३. रचनात्मक लेखन पोर्टफोलियो (कथा शिल्पी AI)</h2>
+    ${creativeRowsHtml}
+
+    <h2>४. सहेजी गई अध्याय एवं वर्कशीट रिपोर्ट्स (${input.savedReports.length})</h2>
+    ${savedCardsHtml}
+
+    <div class="ss-footer">
+      <span>शब्दशिल्प (ShabdShilp) • संपूर्ण प्रगति रिपोर्ट</span>
+      <span>${escapePrintHtml(input.studentInfo?.grade || '')}</span>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  return { title, html };
+}
+
+export function printFullStudentPortfolioReport(input: FullPortfolioReportInput): void {
+  const { title, html } = buildFullStudentPortfolioReportHtml(input);
+  printRawHtmlDocument(html, {
+    title,
+    subtitle: input.studentInfo?.userName
+      ? `${input.studentInfo.userName}${input.studentInfo.grade ? ` • ${input.studentInfo.grade}` : ''}`
+      : undefined,
+    filenameSlug: title,
+  });
+}
+
+export function downloadFullStudentPortfolioReport(input: FullPortfolioReportInput): void {
+  const { title, html } = buildFullStudentPortfolioReportHtml(input);
+  downloadPrintableHtml(html, title);
+}
+
+export interface PrintableWorkbookInput {
+  titleHindi: string;
+  titleEnglish?: string;
+  grade: string;
+  board?: string;
+  studentName?: string;
+  trackedTopics?: string[];
+  mcqQuestions: PrintableWorksheetInput['questions'];
+  paragraphQuestions: Array<{
+    promptHindi: string;
+    paragraphTitleHindi: string;
+    paragraphSentences: string[];
+    explanationHindi?: string;
+  }>;
+  shortQuestions?: Array<{
+    questionHindi: string;
+    questionEnglish?: string;
+    sampleAnswerHindi?: string;
+  }>;
+  creativePrompt?: {
+    genreLabelHindi: string;
+    titleHindi: string;
+    instructionsHindi: string;
+    wordLimit: number;
+    hintsHindi?: string[];
+  };
+  includeAnswers?: boolean;
+}
+
+export function buildInteractiveWorkbookHtml(input: PrintableWorkbookInput): string {
+  const brandLogosHtml = getPrintBrandLogosHtml(44);
+  const mcqsHtml = (input.mcqQuestions || [])
+    .map((q, idx) => {
+      const opts = (q.options || [])
+        .map((opt, oIdx) => {
+          const txt = typeof opt === 'string' ? opt : opt?.textHindi || String(opt);
+          const isAns = input.includeAnswers && oIdx === q.correctIndex;
+          return `<li class="${isAns ? 'ans-correct' : ''}">(${String.fromCharCode(65 + oIdx)}) ${escapePrintHtml(txt)}${isAns ? ' ✓' : ''}</li>`;
+        })
+        .join('');
+      return `
+        <div class="ss-q">
+          <div class="ss-q-title"><strong>${idx + 1}.</strong> ${escapePrintHtml(q.questionHindi)}</div>
+          <ul class="ss-opts">${opts}</ul>
+          ${input.includeAnswers && q.explanationHindi ? `<div class="ss-exp"><strong>व्याख्या:</strong> ${escapePrintHtml(q.explanationHindi)}</div>` : ''}
+        </div>`;
+    })
+    .join('');
+
+  const paraHtml = (input.paragraphQuestions || [])
+    .map(
+      (pq, idx) => `
+      <div class="ss-q">
+        <div class="ss-q-title"><strong>अनुच्छेद प्रश्न ${idx + 1}:</strong> ${escapePrintHtml(pq.promptHindi)}</div>
+        <div class="ss-para-box">
+          <div style="font-weight:800; margin-bottom:4px;">${escapePrintHtml(pq.paragraphTitleHindi)}</div>
+          <p style="margin:0;">${escapePrintHtml((pq.paragraphSentences || []).join(' '))}</p>
+        </div>
+        <div class="ss-line-row">चुना गया शब्द/वाक्य: ______________________ &nbsp;&nbsp; भेद: ______________________</div>
+      </div>`
+    )
+    .join('');
+
+  const shortHtml =
+    input.shortQuestions && input.shortQuestions.length > 0
+      ? `<h2>भाग C · संक्षिप्त 2-पंक्ति प्रश्नोत्तर (Short Answer Questions)</h2>
+        ${input.shortQuestions
+          .map(
+            (sq, idx) => `
+          <div class="ss-q">
+            <div class="ss-q-title"><strong>${idx + 1}.</strong> ${escapePrintHtml(sq.questionHindi)}</div>
+            <div class="ss-write-line"></div>
+            <div class="ss-write-line"></div>
+            ${input.includeAnswers && sq.sampleAnswerHindi ? `<div class="ss-exp"><strong>आदर्श उत्तर:</strong> ${escapePrintHtml(sq.sampleAnswerHindi)}</div>` : ''}
+          </div>`
+          )
+          .join('')}`
+      : '';
+
+  const creativeHtml = input.creativePrompt
+    ? `<h2>भाग D · रचनात्मक लेखन (${escapePrintHtml(input.creativePrompt.genreLabelHindi)})</h2>
+      <div class="ss-q">
+        <div class="ss-q-title"><strong>विषय:</strong> ${escapePrintHtml(input.creativePrompt.titleHindi)} (शब्द सीमा: ~${input.creativePrompt.wordLimit} शब्द)</div>
+        <div style="font-size:11.5px; color:#334155; margin-bottom:8px;">${escapePrintHtml(input.creativePrompt.instructionsHindi)}</div>
+        ${
+          input.creativePrompt.hintsHindi && input.creativePrompt.hintsHindi.length > 0
+            ? `<div style="font-size:11px; color:#4338ca; margin-bottom:8px;"><strong>संकेत बिंदु:</strong> ${escapePrintHtml(input.creativePrompt.hintsHindi.join(' · '))}</div>`
+            : ''
+        }
+        <div class="ss-creative-lines">
+          ${Array.from({ length: 8 })
+            .map(() => '<div class="ss-write-line"></div>')
+            .join('')}
+        </div>
+      </div>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapePrintHtml(input.titleHindi)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    @page { size: A4; margin: 14mm; }
+    .ss-print-doc {
+      font-family: 'Noto Sans Devanagari', 'Plus Jakarta Sans', Arial, sans-serif;
+      color: #0f172a; line-height: 1.55; margin: 0 auto; padding: 16px 20px; max-width: 860px; font-size: 12px; background: #fff;
+    }
+    .ss-print-doc * { box-sizing: border-box; }
+    .ss-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #4338ca; padding-bottom: 10px; margin-bottom: 14px; gap: 12px; }
+    .ss-brand { display: flex; align-items: center; gap: 10px; }
+    h1 { margin: 0; font-size: 17px; color: #1e1b4b; font-weight: 800; }
+    h2 { margin: 16px 0 8px 0; font-size: 13.5px; color: #1e1b4b; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
+    .ss-chips { margin-bottom: 10px; font-size: 11px; color: #334155; background: #eef2ff; border: 1px solid #c7d2fe; padding: 6px 10px; border-radius: 6px; }
+    .ss-q { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; page-break-inside: avoid; break-inside: avoid; }
+    .ss-q-title { margin-bottom: 6px; font-size: 12px; }
+    .ss-opts { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 12px; font-size: 11.5px; }
+    .ans-correct { color: #065f46; font-weight: 800; }
+    .ss-para-box { background: #f8fafc; border: 1px solid #cbd5e1; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 11.5px; }
+    .ss-line-row { font-size: 11px; color: #475569; margin-top: 6px; }
+    .ss-write-line { border-bottom: 1px dashed #94a3b8; height: 22px; margin-top: 4px; }
+    .ss-exp { margin-top: 6px; padding: 5px 8px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; font-size: 11px; color: #065f46; }
+    .ss-footer { margin-top: 16px; padding-top: 8px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; font-size: 10.5px; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="ss-print-doc">
+    <div class="ss-header">
+      <div class="ss-brand">
+        ${brandLogosHtml}
+        <div>
+          <h1>${escapePrintHtml(input.titleHindi)}</h1>
+          <div style="font-size:11px; color:#475569;">
+            ${escapePrintHtml(input.grade)} • ${escapePrintHtml(input.board || 'ICSE')}${input.studentName ? ` • विद्यार्थी: ${escapePrintHtml(input.studentName)}` : ''}
+          </div>
+        </div>
+      </div>
+      <div style="text-align:right; font-size:11px; white-space:nowrap;">
+        <strong>शब्दशिल्प (ShabdShilp)</strong><br />
+        <span>दिनांक: ${new Date().toLocaleDateString('hi-IN')}</span>
+      </div>
+    </div>
+
+    ${input.trackedTopics && input.trackedTopics.length > 0 ? `<div class="ss-chips"><strong>संकलित विषय (Tracked Topics):</strong> ${escapePrintHtml(input.trackedTopics.join(' · '))}</div>` : ''}
+
+    <h2>भाग A · बहुविकल्पीय प्रश्न (MCQs — ${input.mcqQuestions.length})</h2>
+    ${mcqsHtml}
+
+    <h2>भाग B · अनुच्छेद आधारित भाषा परीक्षण (${input.paragraphQuestions.length})</h2>
+    ${paraHtml}
+
+    ${shortHtml}
+    ${creativeHtml}
+
+    <div class="ss-footer">
+      <span>शब्दशिल्प (ShabdShilp) • संकलित अभ्यास पुस्तिका</span>
+      <span>${escapePrintHtml(input.grade)}</span>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+export function printInteractiveWorkbookDocument(input: PrintableWorkbookInput): void {
+  const html = buildInteractiveWorkbookHtml(input);
+  printRawHtmlDocument(html, {
+    title: input.titleHindi,
+    subtitle: `${input.grade} • ${input.board || 'ICSE'}`,
+    filenameSlug: input.titleHindi,
+  });
+}
+
+export function downloadInteractiveWorkbookDocument(input: PrintableWorkbookInput): void {
+  const html = buildInteractiveWorkbookHtml(input);
+  downloadPrintableHtml(html, input.titleHindi || 'shabdshilp-workbook');
 }
 

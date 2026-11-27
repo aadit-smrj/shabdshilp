@@ -19,9 +19,6 @@ import {
   GraduationCap,
   History,
   Target,
-  Printer,
-  Download,
-  FileBarChart2
 } from 'lucide-react';
 import { TimeTravelMachine } from './TimeTravelMachine';
 import { DashboardVocabStudio } from './DashboardVocabStudio';
@@ -31,9 +28,7 @@ import { ReviewWeakAreasSection } from './ReviewWeakAreasSection';
 import { UserProgressState, GradeLevel, BoardType, CheckpointQuizResult, SavedReportSummary, CreativeHomeworkAssignment, CreativeSubmissionRecord } from '../types';
 import { AppTheme, getThemeConfig } from '../utils/theme';
 import { getCurriculumForGrade } from '../data/classCurriculum';
-import { printSavedReportsDocument, downloadSavedReportsHtml } from '../utils/printWorksheet';
 import { loadCreativeHomeworks, loadCreativeSubmissions, subscribeToCrossTabUpdates } from '../utils/firebase';
-import { ComprehensiveReportPanel } from './ComprehensiveReportPanel';
 import { KATHA_SHILPI_FORMATS, WritingFormatId } from '../data/kathaShilpiData';
 
 interface DashboardViewProps {
@@ -51,7 +46,7 @@ interface DashboardViewProps {
   onRecordWrongAnswer?: (topicOrId: string, topicNameHindi?: string, topicNameEnglish?: string, questionText?: string) => void;
   onResolveWeakTopic?: (topicKey: string) => void;
   onRecordReport?: (report: SavedReportSummary) => void;
-  requestedSection?: { section: 'overview' | 'worksheet' | 'reports'; nonce: number } | null;
+  requestedSection?: { section: 'overview' | 'worksheet'; nonce: number } | null;
   currentUser?: { uid?: string; email: string; userName: string; grade: GradeLevel; section?: string } | null;
   theme?: AppTheme;
 }
@@ -77,10 +72,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const themeConfig = getThemeConfig(theme);
   const curriculum = getCurriculumForGrade(grade);
-  const [dashboardSection, setDashboardSection] = useState<'overview' | 'worksheet' | 'reports'>(
+  const [dashboardSection, setDashboardSection] = useState<'overview' | 'worksheet'>(
     requestedSection?.section || 'overview'
   );
-  const [reportFilter, setReportFilter] = useState<'all' | 'grammar_module' | 'worksheets' | 'other'>('all');
   const [requestedQuizTab, setRequestedQuizTab] = useState<{ mode: 'pre' | 'post'; nonce: number } | null>(null);
   const [assignedHomeworks, setAssignedHomeworks] = useState<CreativeHomeworkAssignment[]>([]);
   const [creativeSubmissions, setCreativeSubmissions] = useState<CreativeSubmissionRecord[]>([]);
@@ -150,63 +144,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const hasAttemptedQuiz = Boolean(progress.preCheckpointCompleted || progress.postCheckpointCompleted);
   const streakDays = progress.timeTravel.present.activeStreakDays;
   const weakAreasCount = Object.values(progress.mistakeHistory || {}).filter((m) => m && m.wrongCount > 0).length;
-  const allSavedReports = progress.savedReports || [];
-  const chapterReportsCount = allSavedReports.filter((r) => r.sourceType === 'grammar_module').length;
-  const completedLessonsCount = (progress.completedSimulationModules || []).length;
-
-  const filteredReports = allSavedReports.filter((rep) => {
-    if (reportFilter === 'all') return true;
-    if (reportFilter === 'grammar_module') return rep.sourceType === 'grammar_module';
-    if (reportFilter === 'worksheets') {
-      return (
-        rep.sourceType === 'worksheet' ||
-        rep.sourceType === 'custom_worksheet' ||
-        rep.sourceType === 'checkpoint_quiz'
-      );
-    }
-    return (
-      rep.sourceType !== 'grammar_module' &&
-      rep.sourceType !== 'worksheet' &&
-      rep.sourceType !== 'custom_worksheet' &&
-      rep.sourceType !== 'checkpoint_quiz'
-    );
-  });
-
-  const avgReportPercentage =
-    allSavedReports.length > 0
-      ? Math.round(
-          allSavedReports.reduce((sum, r) => sum + (Number(r.percentage) || 0), 0) /
-            allSavedReports.length
-        )
-      : 0;
-
-  const totalReportCoins = allSavedReports.reduce(
-    (sum, r) => sum + (Number(r.wordCoinsEarned) || 0),
-    0
-  );
-
-  const getReportSourceLabel = (sourceType: SavedReportSummary['sourceType']): string => {
-    switch (sourceType) {
-      case 'grammar_module':
-        return 'अध्याय सिमुलेशन (Chapter Report)';
-      case 'custom_worksheet':
-        return 'कस्टम वर्कशीट';
-      case 'worksheet':
-        return 'वर्कशीट स्टोर';
-      case 'checkpoint_quiz':
-        return 'चेकपॉइंट क्विज़';
-      case 'gadyansh':
-        return 'अपठित गद्यांश';
-      case 'upsarg_pratyay':
-        return 'उपसर्ग-प्रत्यय';
-      case 'weak_areas_review':
-        return 'कमज़ोर विषय अभ्यास';
-      case 'katha_shilpi':
-        return 'कथा शिल्पी';
-      default:
-        return 'प्रगति रिपोर्ट';
-    }
-  };
 
   const jumpToWeakAreasReview = () => {
     setDashboardSection('overview');
@@ -456,37 +393,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <span>२. वर्कशीट जनरेटर व सॉल्वर</span>
           {bilingualMode && <span className="opacity-80 text-[10px] font-normal hidden sm:inline">(Worksheets)</span>}
         </button>
-
-        <button
-          type="button"
-          onClick={() => setDashboardSection('reports')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-            dashboardSection === 'reports'
-              ? `${themeConfig.primaryBg} ${themeConfig.primaryTextOnBg} shadow-xs`
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-          }`}
-        >
-          <FileBarChart2
-            className={`w-3.5 h-3.5 ${
-              dashboardSection === 'reports'
-                ? themeConfig.isLightBanner
-                  ? 'text-slate-950'
-                  : 'text-amber-300'
-                : 'text-emerald-600'
-            }`}
-          />
-          <span>३. रिपोर्ट्स</span>
-          {bilingualMode && <span className="opacity-80 text-[10px] font-normal hidden sm:inline">(Reports)</span>}
-          <span
-            className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded-md ${
-              dashboardSection === 'reports'
-                ? 'bg-white/20 text-current'
-                : 'bg-emerald-100 text-emerald-800'
-            }`}
-          >
-            {allSavedReports.length}
-          </span>
-        </button>
       </div>
 
       {/* TAB 2: EMBEDDED WORKSHEET GENERATOR & SOLVER */}
@@ -500,257 +406,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           onRecordReport={onRecordReport}
           currentUser={currentUser}
         />
-      )}
-
-      {/* TAB 3: DEDICATED REPORTS TAB */}
-      {dashboardSection === 'reports' && (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          <ComprehensiveReportPanel
-            isTeacherView={false}
-            grade={grade}
-            simulationCompletions={progress.simulationCompletions || {}}
-            simulationTopicMetrics={progress.simulationTopicMetrics || {}}
-            completedSimulationModules={progress.completedSimulationModules || []}
-            workbookAttempts={progress.workbookAttempts || []}
-            kathaShilpiPortfolio={progress.kathaShilpiPortfolio || []}
-            allCreativeSubmissions={creativeSubmissions}
-          />
-          {/* Reports Header & Bulk Export */}
-          <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200 shadow-xs space-y-5">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div className="space-y-1">
-                <div className="text-xs font-bold text-emerald-700">
-                  अध्याय रिपोर्ट्स व प्रगति अभिलेख · {selectedBoard} · {grade}
-                </div>
-                <h3 className="text-xl sm:text-2xl font-black text-slate-900 font-serif-display">
-                  रिपोर्ट्स (Saved Chapter & Progress Reports)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  व्याकरण सिमुलेशन पूर्ण करने पर बनने वाली सभी अध्याय रिपोर्ट्स और वर्कशीट रिपोर्ट्स यहाँ सुरक्षित रहती हैं।
-                </p>
-              </div>
-
-              {filteredReports.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      downloadSavedReportsHtml(filteredReports, {
-                        userName: currentUser?.userName,
-                        email: currentUser?.email,
-                        grade,
-                      })
-                    }
-                    className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap"
-                  >
-                    <Download className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                    <span>डाउनलोड करें (Download)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      printSavedReportsDocument(filteredReports, {
-                        userName: currentUser?.userName,
-                        email: currentUser?.email,
-                        grade,
-                      })
-                    }
-                    className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                    <span>सभी प्रिंट करें / PDF</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* KPI Summary Row */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="text-[11px] font-bold text-slate-500">कुल सहेजी गई रिपोर्ट्स</div>
-                <div className="text-2xl font-black text-slate-900 tabular-nums mt-1">
-                  {allSavedReports.length}
-                </div>
-              </div>
-              <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200">
-                <div className="text-[11px] font-bold text-emerald-800">पूर्ण सिमुलेशन अध्याय</div>
-                <div className="text-2xl font-black text-emerald-950 tabular-nums mt-1">
-                  {completedLessonsCount}
-                </div>
-              </div>
-              <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200">
-                <div className="text-[11px] font-bold text-indigo-800">औसत प्रदर्शन स्कोर</div>
-                <div className="text-2xl font-black text-indigo-950 tabular-nums mt-1">
-                  {avgReportPercentage}%
-                </div>
-              </div>
-              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200">
-                <div className="text-[11px] font-bold text-amber-900">रिपोर्ट्स से अर्जित सिक्के</div>
-                <div className="text-2xl font-black text-amber-950 tabular-nums mt-1">
-                  +{totalReportCoins}
-                </div>
-              </div>
-            </div>
-
-            {/* Category Filters */}
-            <div className="flex flex-wrap items-center gap-2">
-              {(
-                [
-                  { id: 'all', label: `सभी (${allSavedReports.length})` },
-                  { id: 'grammar_module', label: `अध्याय सिमुलेशन (${chapterReportsCount})` },
-                  { id: 'worksheets', label: 'वर्कशीट व क्विज़' },
-                  { id: 'other', label: 'गद्यांश व अन्य' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setReportFilter(tab.id)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
-                    reportFilter === tab.id
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Report Cards or Empty State */}
-            {filteredReports.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center mx-auto">
-                  <FileBarChart2 className="w-6 h-6" />
-                </div>
-                <h4 className="text-base font-black text-slate-900">
-                  अभी इस श्रेणी में कोई रिपोर्ट सहेजी नहीं गई है
-                </h4>
-                <p className="text-xs text-slate-600 max-w-md mx-auto font-hindi leading-relaxed">
-                  व्याकरण सिमुलेशन खोलें, किसी अध्याय की कार्यप्रणाली समझें, चीट कोड्स नोट्स प्राप्त करें और अभ्यास प्रश्न हल करें — आपकी अध्याय रिपोर्ट स्वतः यहाँ सहेजी जाएगी!
-                </p>
-                <button
-                  type="button"
-                  onClick={() => onSelectTab('modules')}
-                  className="px-5 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-black inline-flex items-center gap-2 cursor-pointer transition-colors"
-                >
-                  <span>व्याकरण सिमुलेशन शुरू करें</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="grid md:grid-cols-2 gap-4">
-                {filteredReports.map((rep) => (
-                  <div
-                    key={rep.id}
-                    className="p-5 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-3 text-xs flex flex-col justify-between"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-0.5 min-w-0">
-                          <div className="text-[11px] font-bold text-indigo-700">
-                            {getReportSourceLabel(rep.sourceType)}
-                            {rep.grade ? ` · ${rep.grade}` : ''} · {rep.date}
-                          </div>
-                          <h4 className="font-black text-slate-900 text-sm sm:text-base leading-snug font-hindi">
-                            {rep.titleHindi}
-                          </h4>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <div
-                            className={`inline-block font-black px-2.5 py-1 rounded-lg border tabular-nums ${
-                              rep.percentage >= 80
-                                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                                : rep.percentage >= 50
-                                ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                : 'bg-rose-100 text-rose-900 border-rose-300'
-                            }`}
-                          >
-                            {rep.score}/{rep.maxScore} ({rep.percentage}%)
-                          </div>
-                          {rep.wordCoinsEarned > 0 && (
-                            <div className="text-[11px] font-extrabold text-amber-700 mt-1 tabular-nums">
-                              +{rep.wordCoinsEarned} WordCoins
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {rep.strongAreasHindi.length > 0 && (
-                        <div className="text-[11px] text-emerald-900 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200">
-                          <strong>मजबूत पक्ष:</strong> {rep.strongAreasHindi.join(', ')}
-                        </div>
-                      )}
-
-                      {rep.weakAreasHindi.length > 0 && (
-                        <div className="text-[11px] text-rose-900 bg-rose-50 px-3 py-2 rounded-xl border border-rose-200">
-                          <strong>सुधार क्षेत्र:</strong> {rep.weakAreasHindi.join(', ')}
-                        </div>
-                      )}
-
-                      {rep.adviceSummaryHindi && (
-                        <p className="text-xs text-slate-700 leading-relaxed font-hindi">
-                          <strong>सुझाव:</strong> {rep.adviceSummaryHindi}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="pt-3 border-t border-slate-200/80 flex items-center justify-between gap-2 flex-wrap">
-                      {rep.moduleId && onSelectSimulationModule ? (
-                        <button
-                          type="button"
-                          onClick={() => onSelectSimulationModule(rep.moduleId!)}
-                          className="text-xs font-bold text-indigo-700 hover:text-indigo-900 cursor-pointer inline-flex items-center gap-1"
-                        >
-                          <span>अध्याय दोबारा खोलें</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      ) : (
-                        <span className="text-[11px] text-slate-500 tabular-nums">
-                          {typeof rep.attemptedCount === 'number'
-                            ? `हल: ${rep.attemptedCount}/${rep.maxScore}`
-                            : 'खाते में सुरक्षित'}
-                        </span>
-                      )}
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            downloadSavedReportsHtml([rep], {
-                              userName: currentUser?.userName,
-                              email: currentUser?.email,
-                              grade: rep.grade || grade,
-                            })
-                          }
-                          className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1"
-                        >
-                          <Download className="w-3 h-3" />
-                          <span>डाउनलोड</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            printSavedReportsDocument([rep], {
-                              userName: currentUser?.userName,
-                              email: currentUser?.email,
-                              grade: rep.grade || grade,
-                            })
-                          }
-                          className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 rounded-lg text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1"
-                        >
-                          <Printer className="w-3 h-3" />
-                          <span>प्रिंट</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {/* TAB 1: MAIN OVERVIEW */}
@@ -902,34 +557,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       )}
-
-      {/* COMPACT LINK BANNER TO DEDICATED REPORTS TAB */}
-      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0">
-            <FileBarChart2 className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-base sm:text-lg font-black text-slate-900 font-serif-display">
-              अध्याय व प्रगति रिपोर्ट्स (Reports Tab)
-            </h3>
-            <p className="text-xs text-slate-600 tabular-nums">
-              {allSavedReports.length > 0
-                ? `${allSavedReports.length} सहेजी गई रिपोर्ट्स · ${completedLessonsCount} पूर्ण सिमुलेशन अध्याय · औसत स्कोर ${avgReportPercentage}%`
-                : 'सिमुलेशन व वर्कशीट पूर्ण करने के बाद आपकी सभी अध्याय रिपोर्ट्स नए “रिपोर्ट्स” टैब में सहेजी जाएँगी।'}
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setDashboardSection('reports')}
-          className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-black inline-flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap shrink-0"
-        >
-          <span>रिपोर्ट्स टैब खोलें ({allSavedReports.length})</span>
-          <ArrowRight className="w-3.5 h-3.5 text-amber-300" />
-        </button>
-      </div>
 
       {/* ASSIGNED CREATIVE WRITING HOMEWORKS (रचनात्मक लेखन गृहकार्य) */}
       <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-xs space-y-4">

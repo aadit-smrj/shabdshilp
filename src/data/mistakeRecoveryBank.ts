@@ -1,4 +1,11 @@
-import { MistakeTopicStat, QuizQuestion } from '../types';
+import {
+  CreativeSubmissionRecord,
+  MistakeTopicStat,
+  QuizQuestion,
+  SavedReportSummary,
+  SimulationTopicMetric,
+  WorkbookAttemptRecord,
+} from '../types';
 import { randomizeQuizSet } from '../utils/quizShuffle';
 import {
   isQuestionBlockedSiteWide,
@@ -2309,3 +2316,175 @@ export function buildMistakeRecoveryQuestions(
 
   return allQuestions;
 }
+
+export interface EnhancedMistakeStat extends MistakeTopicStat {
+  sources: string[];
+  reportNotes: string[];
+  priorityScore: number;
+}
+
+export function deriveReportEnhancedMistakes(input: {
+  mistakeHistory?: Record<string, MistakeTopicStat>;
+  savedReports?: SavedReportSummary[];
+  simulationTopicMetrics?: Record<string, SimulationTopicMetric>;
+  workbookAttempts?: WorkbookAttemptRecord[];
+  kathaShilpiPortfolio?: CreativeSubmissionRecord[];
+}): EnhancedMistakeStat[] {
+  const merged = new Map<string, EnhancedMistakeStat>();
+
+  const upsertTopic = (
+    rawTopic: string,
+    sourceLabel: string,
+    weight: number,
+    timestamp?: string,
+    note?: string,
+    topicHi?: string,
+    topicEn?: string,
+    sampleQuestions?: string[]
+  ) => {
+    const resolved = resolveTopicKeyFromString(rawTopic || topicHi || 'karak');
+    const labels = getCanonicalTopicLabels(resolved, topicHi, topicEn);
+    const existing = merged.get(resolved);
+    if (existing) {
+      existing.wrongCount = existing.wrongCount + weight;
+      existing.priorityScore += weight;
+      if (timestamp && (!existing.lastWrongAt || timestamp > existing.lastWrongAt)) {
+        existing.lastWrongAt = timestamp;
+      }
+      if (!existing.sources.includes(sourceLabel)) {
+        existing.sources.push(sourceLabel);
+      }
+      if (note && !existing.reportNotes.includes(note)) {
+        existing.reportNotes.push(note);
+      }
+      if (sampleQuestions?.length) {
+        const set = new Set([...(existing.sampleQuestions || []), ...sampleQuestions]);
+        existing.sampleQuestions = Array.from(set).slice(0, 4);
+      }
+    } else {
+      merged.set(resolved, {
+        topicKey: resolved,
+        topicNameHindi: labels.hi,
+        topicNameEnglish: labels.en,
+        wrongCount: weight,
+        lastWrongAt: timestamp || new Date().toISOString(),
+        sampleQuestions: sampleQuestions ? sampleQuestions.slice(0, 4) : [],
+        sources: [sourceLabel],
+        reportNotes: note ? [note] : [],
+        priorityScore: weight,
+      });
+    }
+  };
+
+  // 1. Direct wrong answers recorded across the website
+  for (const stat of Object.values(input.mistakeHistory || {})) {
+    if (!stat || (stat.wrongCount || 0) <= 0) continue;
+    upsertTopic(
+      stat.topicKey || stat.topicNameHindi,
+      'गलत उत्तर लॉग',
+      stat.wrongCount,
+      stat.lastWrongAt,
+      undefined,
+      stat.topicNameHindi,
+      stat.topicNameEnglish,
+      stat.sampleQuestions
+    );
+  }
+
+  // 2. Weak areas & low-score chapters from Saved Reports
+  for (const rep of input.savedReports || []) {
+    if (!rep) continue;
+    const isLowScore = Number(rep.percentage) < 75;
+    const isCriticalScore = Number(rep.percentage) < 55;
+    const weight = isCriticalScore ? 2 : 1;
+
+    if (Array.isArray(rep.weakAreasHindi) && rep.weakAreasHindi.length > 0) {
+      for (const area of rep.weakAreasHindi) {
+        if (!area || !area.trim()) continue;
+        upsertTopic(
+          area,
+          'प्रगति रिपोर्ट',
+          weight,
+          rep.timestamp || rep.date,
+          `${rep.titleHindi} (${rep.percentage}%)`
+        );
+      }
+    } else if (isLowScore) {
+      upsertTopic(
+        rep.moduleId || rep.titleHindi,
+        'प्रगति रिपोर्ट',
+        weight,
+        rep.timestamp || rep.date,
+        `${rep.titleHindi} (${rep.percentage}%)`
+      );
+    }
+  }
+
+  // 3. Simulation Topic Metrics (<80% accuracy)
+  for (const [modId, metric] of Object.entries(input.simulationTopicMetrics || {})) {
+    if (!metric || !metric.attempts) continue;
+    const avgPct =
+      metric.totalMaxSum > 0
+        ? Math.round((metric.totalScoreSum / metric.totalMaxSum) * 100)
+        : metric.lastAccuracyPct;
+    if (avgPct < 80 || metric.lastAccuracyPct < 80) {
+      upsertTopic(
+        modId,
+        'अध्याय सिमुलेशन रिपोर्ट',
+        avgPct < 60 ? 2 : 1,
+        metric.lastCompletedAt,
+        `सिमुलेशन सटीकता ${avgPct}%`
+      );
+    }
+  }
+
+  // 4. Interactive Workbook Attempts (weak MCQ, paragraph selection, or bhed)
+  for (const wb of input.workbookAttempts || []) {
+    if (!wb) continue;
+    const selectPct = wb.paraSelectTotal > 0 ? Math.round((wb.paraSelectCorrect / wb.paraSelectTotal) * 100) : 100;
+    const bhedPct = wb.paraBhedTotal > 0 ? Math.round((wb.paraBhedCorrect / wb.paraBhedTotal) * 100) : 100;
+    const mcqPct = wb.mcqTotal > 0 ? Math.round((wb.mcqCorrect / wb.mcqTotal) * 100) : 100;
+    if (selectPct < 75 || bhedPct < 75) {
+      upsertTopic(
+        'vakya',
+        'अभ्यास पुस्तिका रिपोर्ट',
+        1,
+        wb.completedAt,
+        `${wb.titleHindi} (भेद ${bhedPct}%)`
+      );
+    }
+    if (mcqPct < 75) {
+      upsertTopic(
+        'sangya',
+        'अभ्यास पुस्तिका रिपोर्ट',
+        1,
+        wb.completedAt,
+        `${wb.titleHindi} (MCQ ${mcqPct}%)`
+      );
+    }
+  }
+
+  // 5. Katha Shilpi Creative Writing Grammar / Spelling Errors
+  for (const sub of input.kathaShilpiPortfolio || []) {
+    if (!sub) continue;
+    const hasGrammarGaps =
+      (Array.isArray(sub.grammarErrors) && sub.grammarErrors.length > 0) ||
+      (typeof sub.rubricScores?.vyakaranVartani === 'number' && sub.rubricScores.vyakaranVartani < 7) ||
+      Number(sub.overallScore) < 75;
+    if (hasGrammarGaps) {
+      upsertTopic(
+        'ashuddhi',
+        'रचनात्मक लेखन रिपोर्ट',
+        1,
+        sub.submittedAt,
+        `${sub.titleHindi} (${sub.overallScore}/100)`
+      );
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => {
+    if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
+    return (b.lastWrongAt || '').localeCompare(a.lastWrongAt || '');
+  });
+}
+

@@ -23,6 +23,7 @@ import {
 import { TeacherDashboard } from './components/TeacherDashboard';
 import { SyllabusView } from './components/SyllabusView';
 import { CustomWorksheetStudio } from './components/CustomWorksheetStudio';
+import { ReportsSectionView } from './components/ReportsSectionView';
 import { StoryBuilder } from './components/StoryBuilder';
 import { PrintPreviewModal } from './components/PrintPreviewModal';
 import { LogOut, ShieldAlert } from 'lucide-react';
@@ -342,7 +343,7 @@ export default function App() {
   const [selectedCreativeHomework, setSelectedCreativeHomework] =
     useState<CreativeHomeworkAssignment | null>(null);
   const [dashboardSectionRequest, setDashboardSectionRequest] = useState<{
-    section: 'overview' | 'worksheet' | 'reports';
+    section: 'overview' | 'worksheet';
     nonce: number;
   } | null>(null);
 
@@ -352,8 +353,7 @@ export default function App() {
   };
 
   const handleOpenDashboardReports = () => {
-    setDashboardSectionRequest({ section: 'reports', nonce: Date.now() });
-    handleSelectTab('dashboard');
+    handleSelectTab('reports');
   };
 
   const handleOpenHomeworkInWriter = (hw: CreativeHomeworkAssignment) => {
@@ -1449,6 +1449,9 @@ export default function App() {
                 bilingualMode={bilingualMode}
                 currentUser={currentUser}
                 mistakeHistory={progress.mistakeHistory || {}}
+                savedReports={progress.savedReports || []}
+                simulationTopicMetrics={progress.simulationTopicMetrics || {}}
+                kathaShilpiPortfolio={progress.kathaShilpiPortfolio || []}
                 completedWorksheetResults={progress.completedWorksheetResults || {}}
                 completedSimulationModules={progress.completedSimulationModules || []}
                 simulationCompletions={progress.simulationCompletions || {}}
@@ -1458,6 +1461,20 @@ export default function App() {
                 onRecordWrongAnswer={handleRecordWrongAnswer}
                 onRecordWorksheetResult={handleRecordWorksheetResult}
                 onRecordReport={handleRecordReport}
+                onCreativeSubmissionSaved={handleCreativeSubmissionSaved}
+                onNavigateToReports={() => handleSelectTab('reports')}
+              />
+            )}
+
+            {currentTab === 'reports' && (
+              <ReportsSectionView
+                progress={progress}
+                grade={selectedGrade}
+                selectedBoard={selectedBoard}
+                bilingualMode={bilingualMode}
+                currentUser={currentUser}
+                onSelectTab={handleSelectTab}
+                onSelectSimulationModule={handleOpenSimulationModule}
               />
             )}
           </>

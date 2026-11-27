@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
@@ -3890,7 +3891,9 @@ PERFORM ACCURATE MULTIMODAL HANDWRITTEN HINDI OCR & STRUCTURED ICSE EVALUATION:
 });
 
 // ==================== PER-ID PERSISTENCE & PORTAL AUTH STORE ====================
-const DATA_DIR = path.resolve(__dirname, '.shabdshilp-data');
+const DATA_DIR = process.env.VERCEL
+  ? path.resolve(os.tmpdir(), '.shabdshilp-data')
+  : path.resolve(__dirname, '.shabdshilp-data');
 const STORE_FILE = path.resolve(DATA_DIR, 'store.json');
 if (!STORE_FILE.startsWith(DATA_DIR + path.sep)) {
   throw new Error('Invalid persistence store path');
@@ -4533,7 +4536,11 @@ async function setupViteOrStatic() {
   });
 }
 
-setupViteOrStatic().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  setupViteOrStatic().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
+
+export default app;

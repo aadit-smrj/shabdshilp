@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   FileCheck, 
   Coins, 
@@ -13,7 +13,10 @@ import {
   Upload,
   Check,
   Shuffle,
-  Printer
+  Printer,
+  Download,
+  FileBarChart2,
+  PenTool
 } from 'lucide-react';
 import { SPECIAL_WORKSHEETS } from '../data/grammarData';
 import { CLASS5_STORE_WORKSHEETS, CLASS6_STORE_WORKSHEETS } from '../data/class5And6Data';
@@ -34,18 +37,30 @@ import {
   SavedWorksheetResult,
   InteractiveWorkbookDefinition,
   WorkbookAttemptRecord,
+  SimulationTopicMetric,
+  CreativeSubmissionRecord,
 } from '../types';
 import {
-  INTERACTIVE_WORKBOOKS,
-  checkInteractiveWorkbookGate,
+  COMBINED_WORKBOOK_ID,
+  COMBINED_WORKBOOK_COST,
+  buildCombinedCompiledWorkbook,
   checkStoreWorksheetGate,
   WorkbookPrerequisiteItem,
 } from '../data/interactiveWorkbookData';
 import { InteractiveWorkbookRunner } from './InteractiveWorkbookRunner';
-import { buildMistakeRecoveryQuestions } from '../data/mistakeRecoveryBank';
+import {
+  buildMistakeRecoveryQuestions,
+  deriveReportEnhancedMistakes,
+  EnhancedMistakeStat,
+} from '../data/mistakeRecoveryBank';
 import { triggerCelebration, triggerCoinBurst } from '../utils/confetti';
 import { randomizeQuizSet } from '../utils/quizShuffle';
-import { printWorksheetDocument } from '../utils/printWorksheet';
+import {
+  downloadInteractiveWorkbookDocument,
+  downloadWorksheetDocument,
+  printInteractiveWorkbookDocument,
+  printWorksheetDocument,
+} from '../utils/printWorksheet';
 import { buildWorksheetReport, toSavedReportSummary } from '../utils/worksheetReport';
 import { WorksheetReportCard } from './WorksheetReportCard';
 import { 
@@ -90,6 +105,9 @@ interface WorksheetsStoreProps {
   bilingualMode: boolean;
   currentUser?: { email: string; userName: string; grade: GradeLevel; section?: string } | null;
   mistakeHistory?: Record<string, MistakeTopicStat>;
+  savedReports?: SavedReportSummary[];
+  simulationTopicMetrics?: Record<string, SimulationTopicMetric>;
+  kathaShilpiPortfolio?: CreativeSubmissionRecord[];
   completedWorksheetResults?: Record<string, SavedWorksheetResult>;
   completedSimulationModules?: string[];
   simulationCompletions?: Record<string, number>;
@@ -99,6 +117,8 @@ interface WorksheetsStoreProps {
   onRecordWrongAnswer?: (topicOrId: string, topicNameHindi?: string, topicNameEnglish?: string, questionText?: string) => void;
   onRecordWorksheetResult?: (worksheetId: string, result: SavedWorksheetResult) => void;
   onRecordReport?: (report: SavedReportSummary) => void;
+  onCreativeSubmissionSaved?: (submission: CreativeSubmissionRecord) => void;
+  onNavigateToReports?: () => void;
 }
 
 export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
@@ -111,6 +131,9 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
   bilingualMode,
   currentUser,
   mistakeHistory = {},
+  savedReports = [],
+  simulationTopicMetrics = {},
+  kathaShilpiPortfolio = [],
   completedWorksheetResults = {},
   completedSimulationModules = [],
   simulationCompletions = {},
@@ -120,6 +143,8 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
   onRecordWrongAnswer,
   onRecordWorksheetResult,
   onRecordReport,
+  onCreativeSubmissionSaved,
+  onNavigateToReports,
 }) => {
   const [activeWorksheet, setActiveWorksheet] = useState<WorksheetItem | TeacherWorksheet | null>(null);
   const [activeInteractiveWorkbook, setActiveInteractiveWorkbook] = useState<InteractiveWorkbookDefinition | null>(null);
@@ -135,9 +160,30 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
   const [earnedCoins, setEarnedCoins] = useState<number>(0);
   const [coinNotice, setCoinNotice] = useState<string | null>(null);
 
-  const mistakeList: MistakeTopicStat[] = Object.values(mistakeHistory || {})
-    .filter((m): m is MistakeTopicStat => Boolean(m && (m.topicKey || m.topicNameHindi)))
-    .sort((a, b) => (b.wrongCount || 0) - (a.wrongCount || 0));
+  const mistakeList: EnhancedMistakeStat[] = useMemo(
+    () =>
+      deriveReportEnhancedMistakes({
+        mistakeHistory,
+        savedReports,
+        simulationTopicMetrics,
+        workbookAttempts,
+        kathaShilpiPortfolio,
+      }),
+    [mistakeHistory, savedReports, simulationTopicMetrics, workbookAttempts, kathaShilpiPortfolio]
+  );
+
+  const combinedWorkbook: InteractiveWorkbookDefinition = useMemo(
+    () =>
+      buildCombinedCompiledWorkbook({
+        grade,
+        completedSimulationModules,
+        simulationCompletions,
+        savedReports,
+      }),
+    [grade, completedSimulationModules, simulationCompletions, savedReports]
+  );
+
+  const isCombinedWorkbookUnlocked = unlockedIds.includes(COMBINED_WORKBOOK_ID);
 
   const gradeStoreWorksheets: WorksheetItem[] =
     grade === 'कक्षा 5'
@@ -153,6 +199,16 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
       : grade === 'कक्षा 10'
       ? CLASS10_STORE_WORKSHEETS
       : SPECIAL_WORKSHEETS;
+
+  // One 4-WordCoin starter worksheet per grade is always unlocked for immediate practice
+  const alwaysUnlockedWorksheetId =
+    gradeStoreWorksheets.find((ws) => ws.costWordCoins === 4)?.id ||
+    gradeStoreWorksheets.find((ws) => ws.isUnlocked)?.id ||
+    gradeStoreWorksheets[0]?.id ||
+    null;
+
+  const isWorksheetUnlocked = (ws: WorksheetItem): boolean =>
+    Boolean(ws.isUnlocked) || ws.id === alwaysUnlockedWorksheetId || unlockedIds.includes(ws.id);
 
   // Reset active worksheet cleanly when grade switches
   useEffect(() => {
@@ -315,17 +371,17 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
         : ['कारक एवं परसर्ग', 'काल (Tenses)', 'वाक्य रचना और रूपांतरण'];
     const recoveryWorksheet: WorksheetItem = {
       id: 'mistake_recovery_special',
-      titleHindi: 'गलती-सुधार विशेष अभ्यास वर्कशीट (हमेशा अनलॉक)',
-      titleEnglish: 'Mistake Recovery Worksheet (Always Unlocked)',
+      titleHindi: 'रिपोर्ट-आधारित त्रुटि सुधार वर्कशीट (हमेशा अनलॉक)',
+      titleEnglish: 'Report-Enhanced Mistake Recovery Worksheet (Always Unlocked)',
       costWordCoins: 0,
       descriptionHindi:
         mistakeList.length > 0
-          ? `वेबसाइट पर जिन ${mistakeList.length} प्रश्न-प्रकारों में आपसे त्रुटियाँ हुईं, उनमें से प्रत्येक के 4-4 अनूठे प्रश्न शामिल हैं।`
-          : 'यह वर्कशीट हमेशा अनलॉक है। अभी 12 आधारभूत अभ्यास प्रश्नों से शुरुआत करें — और वेबसाइट पर जो भी प्रश्न गलत होंगे, उनके 4-4 लक्ष्य प्रश्न यहाँ स्वतः जुड़ते जाएंगे!',
+          ? `आपकी रिपोर्ट्स, सिमुलेशन, वर्कबुक्स व गलत उत्तरों से पहचाने गए ${mistakeList.length} कमज़ोर विषयों के 4-4 अनूठे अभ्यास प्रश्न शामिल हैं।`
+          : 'यह वर्कशीट हमेशा अनलॉक है। अभी 12 आधारभूत अभ्यास प्रश्नों से शुरुआत करें — और आपकी रिपोर्ट्स व अभ्यास में जो भी कमज़ोरी मिलेगी, उसके 4-4 लक्ष्य प्रश्न यहाँ स्वतः जुड़ते जाएंगे!',
       descriptionEnglish:
         mistakeList.length > 0
-          ? `Includes 4 targeted practice questions for each of the ${mistakeList.length} question types you missed across the platform.`
-          : 'Always unlocked! Start with 12 foundational practice questions — any questions missed across the platform automatically add 4 targeted questions per type.',
+          ? `Includes 4 targeted practice questions for each of the ${mistakeList.length} weak topics identified from your reports and quizzes.`
+          : 'Always unlocked! Start with 12 foundational questions — any weak areas spotted in your reports automatically add 4 targeted questions per topic.',
       topicsCovered: topicsSummary,
       questionCount: recoveryQuestions.length,
       isUnlocked: true,
@@ -341,21 +397,22 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
     } catch (_e) {}
   };
 
-  const handleOpenInteractiveWorkbook = (wb: InteractiveWorkbookDefinition) => {
+  const handleOpenCombinedWorkbook = () => {
     setCoinNotice(null);
-    const gate = checkInteractiveWorkbookGate(wb, grade, {
-      simulationCompletions,
-      completedSimulationModules,
-    });
-    if (!gate.isUnlockedBySim) {
-      setLockedGateInfo({
-        titleHindi: wb.titleHindi,
-        requirements: gate.requirements,
-      });
-      return;
+    if (!isCombinedWorkbookUnlocked) {
+      if (wordCoins < COMBINED_WORKBOOK_COST) {
+        setCoinNotice(
+          `समग्र संकलित अभ्यास पुस्तिका अनलॉक करने के लिए ${COMBINED_WORKBOOK_COST} WordCoins आवश्यक हैं (आपके पास ${wordCoins} WordCoins हैं)। वर्कशीट्स या सिमुलेशन हल करके सिक्के कमाएँ!`
+        );
+        return;
+      }
+      const deducted = onDeductWordCoins(COMBINED_WORKBOOK_COST);
+      if (!deducted) return;
+      onUnlockWorksheet(COMBINED_WORKBOOK_ID);
+      triggerCoinBurst();
     }
     setActiveWorksheet(null);
-    setActiveInteractiveWorkbook(wb);
+    setActiveInteractiveWorkbook(combinedWorkbook);
     try {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (_e) {}
@@ -369,7 +426,7 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
       ...ws,
       practiceQuestions: randomizeQuizSet(ws.practiceQuestions || [])
     };
-    if (unlockedIds.includes(ws.id)) {
+    if (isWorksheetUnlocked(ws)) {
       setActiveWorksheet(randomizedWs);
       setWorksheetAnswers({});
       setIsGraded(false);
@@ -728,11 +785,14 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
           workbook={activeInteractiveWorkbook}
           grade={grade}
           bilingualMode={bilingualMode}
+          studentName={currentUser?.userName}
+          studentEmail={currentUser?.email}
           onReturn={() => setActiveInteractiveWorkbook(null)}
           onAddWordCoins={onAddWordCoins}
           onRecordWrongAnswer={onRecordWrongAnswer}
           onRecordReport={onRecordReport}
           onRecordWorkbookAttempt={onRecordWorkbookAttempt}
+          onCreativeSubmissionSaved={onCreativeSubmissionSaved}
         />
       ) : activeWorksheet ? (
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm space-y-6">
@@ -798,6 +858,38 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const qList = isTeacherLiveWorksheet
+                    ? (activeWorksheet as TeacherWorksheet).questions
+                    : (activeWorksheet as WorksheetItem).practiceQuestions;
+                  downloadWorksheetDocument({
+                    titleHindi: activeWorksheet.titleHindi,
+                    subtitle: isTeacherLiveWorksheet
+                      ? `शिक्षक: ${(activeWorksheet as TeacherWorksheet).teacherName}`
+                      : (activeWorksheet as WorksheetItem).titleEnglish,
+                    grade: isTeacherLiveWorksheet
+                      ? (activeWorksheet as TeacherWorksheet).grade
+                      : grade,
+                    board: 'ICSE',
+                    topic: isTeacherLiveWorksheet
+                      ? (activeWorksheet as TeacherWorksheet).topic
+                      : (activeWorksheet as WorksheetItem).topicsCovered?.join(', '),
+                    teacherName: isTeacherLiveWorksheet
+                      ? (activeWorksheet as TeacherWorksheet).teacherName
+                      : undefined,
+                    questions: qList || [],
+                    includeAnswers: isGraded,
+                    includeEnglish: bilingualMode,
+                  });
+                }}
+                className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                title="इस वर्कशीट को डाउनलोड करें"
+              >
+                <Download className="w-3.5 h-3.5 text-indigo-600" />
+                <span>डाउनलोड</span>
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1191,79 +1283,169 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
             </div>
           )}
 
-          {/* ================= SECTION 1: MISTAKE RECOVERY (TRUTI SUDHAR) ================= */}
+          {/* ================= SECTION 1: REPORT-ENHANCED MISTAKE RECOVERY (TRUTI SUDHAR) ================= */}
           <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-xl font-black text-slate-900 font-serif-display">
-                भाग १ · त्रुटि सुधार (Mistake Recovery / Truti Sudhar)
+                भाग १ · रिपोर्ट-आधारित त्रुटि सुधार (Report-Enhanced Mistake Recovery)
               </h3>
-              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-                हमेशा अनलॉक · 0 WordCoins
-              </span>
-            </div>
-            <div className="bg-gradient-to-br from-emerald-50 via-white to-teal-50/70 rounded-3xl p-6 border-2 border-emerald-300 shadow-sm space-y-4 relative overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white text-xs font-black rounded-full shadow-2xs">
-                  <Unlock className="w-3.5 h-3.5" />
-                  <span>हमेशा अनलॉक (Always Unlocked)</span>
-                </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold rounded-full">
-                  <Coins className="w-3.5 h-3.5 text-amber-700" />
-                  <span>0 WordCoins (निःशुल्क सुधार)</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                {onNavigateToReports && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToReports}
+                    className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <FileBarChart2 className="w-3.5 h-3.5" />
+                    <span>प्रगति रिपोर्ट्स देखें</span>
+                  </button>
+                )}
+                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                  हमेशा अनलॉक · 0 WordCoins
                 </span>
               </div>
-              {mistakeList.length > 0 && (
-                <span className="text-xs font-extrabold text-emerald-900 bg-white px-3 py-1 rounded-full border border-emerald-200">
-                  {mistakeList.length} प्रकार • {mistakeList.length * 4} लक्ष्य प्रश्न
-                </span>
-              )}
             </div>
-
-            <div className="space-y-1.5">
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 font-serif-display">
-                गलती-सुधार विशेष अभ्यास वर्कशीट (Mistake Recovery Worksheet)
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                पूरी वेबसाइट (चेकपॉइंट क्विज़, सिमुलेशन, कस्टम वर्कशीट, उपसर्ग-प्रत्यय, अपठित गद्यांश या स्टोर वर्कशीट्स) में आपसे जो भी प्रश्न गलत हुए हैं, उनके प्रत्येक प्रकार के <strong>कम से कम 4 अनूठे प्रश्न</strong> यहाँ स्वतः जुड़ जाते हैं — और ये <strong>सभी प्रश्न पूरी वेबसाइट के अन्य किसी भी क्विज़ या वर्कशीट से दोहराए नहीं जाते</strong>!
-              </p>
-            </div>
-
-            {mistakeList.length > 0 ? (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  {mistakeList.map((stat) => (
-                    <div
-                      key={stat.topicKey}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-emerald-200 text-xs shadow-2xs"
-                    >
-                      <span className="font-bold text-slate-900">{stat.topicNameHindi}</span>
-                      <span className="text-[10px] font-extrabold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-200">
-                        {stat.wrongCount} त्रुटि
-                      </span>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200">
-                        4 प्रश्न
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="pt-2 flex items-center justify-between flex-wrap gap-3 border-t border-emerald-200/70">
-                  <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-500" />
-                    <span>सही उत्तर देने पर भी हर 2 सही उत्तर = 1 WordCoin मिलेगा!</span>
+            <div className="bg-gradient-to-br from-emerald-50 via-white to-teal-5/70 rounded-3xl p-6 border-2 border-emerald-300 shadow-sm space-y-4 relative overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white text-xs font-black rounded-full shadow-2xs">
+                    <Unlock className="w-3.5 h-3.5" />
+                    <span>हमेशा अनलॉक (Always Unlocked)</span>
                   </span>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold rounded-full">
+                    <Coins className="w-3.5 h-3.5 text-amber-700" />
+                    <span>0 WordCoins (निःशुल्क सुधार)</span>
+                  </span>
+                </div>
+                {mistakeList.length > 0 && (
+                  <span className="text-xs font-extrabold text-emerald-900 bg-white px-3 py-1 rounded-full border border-emerald-200">
+                    {mistakeList.length} रिपोर्ट विषय • {mistakeList.length * 4} लक्ष्य प्रश्न
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 font-serif-display">
+                  गलती-सुधार विशेष अभ्यास वर्कशीट (Report-Linked Mistake Recovery)
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  आपकी <strong>प्रगति रिपोर्ट्स, सिमुलेशन परिणाम, अभ्यास पुस्तिकाओं, कथा शिल्पी लेखन व गलत उत्तरों</strong> से पहचाने गए हर कमज़ोर विषय के <strong>4 अनूठे लक्ष्य प्रश्न</strong> यहाँ स्वतः संकलित होते हैं — और ये प्रश्न वेबसाइट के अन्य किसी क्विज़ से दोहराए नहीं जाते!
+                </p>
+              </div>
+
+              {mistakeList.length > 0 ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {mistakeList.map((stat) => (
+                      <div
+                        key={stat.topicKey}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-emerald-200 text-xs shadow-2xs flex-wrap"
+                      >
+                        <span className="font-bold text-slate-900">{stat.topicNameHindi}</span>
+                        <span className="text-[10px] font-extrabold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-200">
+                          {stat.sources[0] || 'रिपोर्ट विश्लेषण'}
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200">
+                          4 प्रश्न
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-between flex-wrap gap-3 border-t border-emerald-200/70">
+                    <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span>सही उत्तर देने पर भी हर 2 सही उत्तर = 1 WordCoin मिलेगा!</span>
+                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const recoveryQs = generateExclusiveMistakeRecoverySet(mistakeList);
+                          downloadWorksheetDocument({
+                            titleHindi: 'रिपोर्ट-आधारित त्रुटि सुधार वर्कशीट (Mistake Recovery)',
+                            subtitle: 'रिपोर्ट विश्लेषण एवं कमज़ोर विषय सुधार',
+                            grade,
+                            board: 'ICSE',
+                            topic: mistakeList.map((m) => m.topicNameHindi).join(', ') || 'संपूर्ण व्याकरण',
+                            questions: recoveryQs,
+                            includeAnswers: false,
+                            includeEnglish: bilingualMode,
+                          });
+                        }}
+                        className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-emerald-300 rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>डाउनलोड</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const recoveryQs = generateExclusiveMistakeRecoverySet(mistakeList);
+                          printWorksheetDocument({
+                            titleHindi: 'रिपोर्ट-आधारित त्रुटि सुधार वर्कशीट (Mistake Recovery)',
+                            subtitle: 'रिपोर्ट विश्लेषण एवं कमज़ोर विषय सुधार',
+                            grade,
+                            board: 'ICSE',
+                            topic: mistakeList.map((m) => m.topicNameHindi).join(', ') || 'संपूर्ण व्याकरण',
+                            questions: recoveryQs,
+                            includeAnswers: false,
+                            includeEnglish: bilingualMode,
+                          });
+                        }}
+                        className="px-3.5 py-2.5 bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
+                        title="गलती-सुधार वर्कशीट प्रिंट करें"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>प्रिंट</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenMistakeRecovery}
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span>गलती-सुधार वर्कशीट हल करें ({mistakeList.length * 4} प्रश्न)</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="p-4 bg-white/90 rounded-2xl border border-emerald-200 text-xs text-slate-700 flex items-center justify-between flex-wrap gap-3">
+                  <span className="flex-1 min-w-[220px] leading-relaxed">
+                    अभी रिपोर्ट्स में कोई कमज़ोर विषय या त्रुटि दर्ज नहीं है। यह वर्कशीट पहले ही <strong>हमेशा के लिए अनलॉक</strong> है — आप अभी 12 अभ्यास प्रश्नों के साथ इसे खोल सकते हैं, और जैसे-जैसे रिपोर्ट्स में सुधार क्षेत्र मिलेंगे, वे यहाँ स्वतः जुड़ते जाएँगे!
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
                     <button
                       type="button"
                       onClick={() => {
-                        const recoveryQs = generateExclusiveMistakeRecoverySet(mistakeList);
-                        printWorksheetDocument({
-                          titleHindi: 'गलती-सुधार विशेष अभ्यास वर्कशीट (Mistake Recovery)',
-                          subtitle: 'निःशुल्क अभ्यास एवं कमज़ोर विषय सुधार',
+                        const recoveryQs = generateExclusiveMistakeRecoverySet([]);
+                        downloadWorksheetDocument({
+                          titleHindi: 'रिपोर्ट-आधारित त्रुटि सुधार वर्कशीट (Mistake Recovery)',
+                          subtitle: 'निःशुल्क अभ्यास वर्कशीट',
                           grade,
                           board: 'ICSE',
-                          topic: mistakeList.map((m) => m.topicNameHindi).join(', ') || 'संपूर्ण व्याकरण',
+                          topic: 'संपूर्ण व्याकरण',
+                          questions: recoveryQs,
+                          includeAnswers: false,
+                          includeEnglish: bilingualMode,
+                        });
+                      }}
+                      className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-emerald-300 rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>डाउनलोड</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const recoveryQs = generateExclusiveMistakeRecoverySet([]);
+                        printWorksheetDocument({
+                          titleHindi: 'रिपोर्ट-आधारित त्रुटि सुधार वर्कशीट (Mistake Recovery)',
+                          subtitle: 'निःशुल्क अभ्यास वर्कशीट',
+                          grade,
+                          board: 'ICSE',
+                          topic: 'संपूर्ण व्याकरण',
                           questions: recoveryQs,
                           includeAnswers: false,
                           includeEnglish: bilingualMode,
@@ -1278,127 +1460,278 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
                     <button
                       type="button"
                       onClick={handleOpenMistakeRecovery}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
                     >
-                      <span>गलती-सुधार वर्कशीट हल करें ({mistakeList.length * 4} प्रश्न)</span>
+                      <span>गलती-सुधार वर्कशीट खोलें (12 प्रश्न)</span>
                       <ArrowRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
-              </>
-            ) : (
-              <div className="p-4 bg-white/90 rounded-2xl border border-emerald-200 text-xs text-slate-700 flex items-center justify-between flex-wrap gap-3">
-                <span className="flex-1 min-w-[220px] leading-relaxed">
-                  अभी तक कोई गलत प्रश्न दर्ज नहीं हुआ है। यह वर्कशीट पहले ही <strong>हमेशा के लिए अनलॉक</strong> है — आप अभी 12 अभ्यास प्रश्नों के साथ इसे खोल सकते हैं, और जैसे-जैसे कोई प्रश्न गलत होगा, उसी प्रकार के 4-4 प्रश्न यहाँ जुड़ते जाएँगे!
-                </span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const recoveryQs = generateExclusiveMistakeRecoverySet([]);
-                      printWorksheetDocument({
-                        titleHindi: 'गलती-सुधार विशेष अभ्यास वर्कशीट (Mistake Recovery)',
-                        subtitle: 'निःशुल्क अभ्यास वर्कशीट',
-                        grade,
-                        board: 'ICSE',
-                        topic: 'संपूर्ण व्याकरण',
-                        questions: recoveryQs,
-                        includeAnswers: false,
-                        includeEnglish: bilingualMode,
-                      });
-                    }}
-                    className="px-3.5 py-2.5 bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
-                    title="गलती-सुधार वर्कशीट प्रिंट करें"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>प्रिंट</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenMistakeRecovery}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                  >
-                    <span>गलती-सुधार वर्कशीट खोलें (12 प्रश्न)</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
             </div>
           </div>
 
-          {/* ================= SECTION 2: ABHYAS PUSTIKA (SAMPLE WORKBOOKS) ================= */}
-          <div className="space-y-6 pt-2">
+          {/* ================= SECTION 2: ONE COMBINED COMPILED SAMPLE WORKBOOK (25 WORDCOINS) ================= */}
+          <div className="space-y-4 pt-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h3 className="text-xl sm:text-2xl font-black text-slate-900 font-serif-display">
-                  भाग २ · अभ्यास पुस्तिका व सैंपल वर्कशीट्स (Abhyas Pustika / Sample Workbooks)
+                  भाग २ · समग्र संकलित अभ्यास पुस्तिका (Combined Compiled Sample Workbook)
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  अभ्यास पुस्तिका अनलॉक करने के लिए संबंधित व्याकरण सिमुलेशन पाठ पूर्ण करना आवश्यक है।
+                  आपके ट्रैक किए गए पूर्ण पाठों, विभिन्न प्रश्न-प्रकारों और रचनात्मक लेखन को मिलाकर तैयार एकमात्र समग्र अभ्यास पुस्तिका।
                 </p>
               </div>
-              <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200">
-                MCQ + अनुच्छेद भाषा परीक्षण + {grade} वर्कशीट्स
+              <span className="inline-flex items-center gap-1.5 text-xs font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-full border border-amber-300">
+                <Coins className="w-3.5 h-3.5 text-amber-700" />
+                <span>{COMBINED_WORKBOOK_COST} WordCoins से अनलॉक</span>
               </span>
             </div>
 
-            {/* Subsection 2A: Interactive Sample Workbooks (Zero-Hint Paragraph + MCQ) */}
-            <div className="space-y-3">
-              <div className="text-xs font-black uppercase tracking-wider text-indigo-800">
-                संवादात्मक अभ्यास पुस्तिकाएँ — MCQ + शब्द/वाक्य अनुच्छेद परीक्षण
-              </div>
-              <div className="grid md:grid-cols-3 gap-4">
-                {INTERACTIVE_WORKBOOKS.map((wb) => {
-                  const gate = checkInteractiveWorkbookGate(wb, grade, {
-                    simulationCompletions,
-                    completedSimulationModules,
-                  });
-                  const lastAttempt = [...workbookAttempts]
-                    .reverse()
-                    .find((a) => a.workbookId === wb.id);
+            {(() => {
+              const lastCombinedAttempt = [...workbookAttempts]
+                .reverse()
+                .find((a) => a.workbookId === COMBINED_WORKBOOK_ID);
 
-                  return (
-                    <div
-                      key={wb.id}
-                      className={`rounded-3xl p-5 border shadow-xs flex flex-col justify-between space-y-4 ${
-                        gate.isUnlockedBySim
-                          ? 'bg-white border-indigo-200'
-                          : 'bg-slate-50/90 border-slate-200'
-                      }`}
-                    >
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200">
-                            {wb.mcqQuestions.length} MCQ + {wb.paragraphQuestions.length} अनुच्छेद
-                          </span>
+              return (
+                <div className="bg-gradient-to-br from-indigo-50 via-white to-violet-50 rounded-3xl p-6 sm:p-7 border-2 border-indigo-300 shadow-sm space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
+                          isCombinedWorkbookUnlocked
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-indigo-700 text-white'
+                        }`}
+                      >
+                        {isCombinedWorkbookUnlocked ? (
+                          <>
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>अनलॉक है (Unlocked)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>{COMBINED_WORKBOOK_COST} WordCoins आवश्यक</span>
+                          </>
+                        )}
+                      </span>
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-white text-indigo-900 border border-indigo-200">
+                        {combinedWorkbook.mcqQuestions.length} MCQ · {combinedWorkbook.paragraphQuestions.length} अनुच्छेद · {combinedWorkbook.shortQuestions?.length || 0} लघु प्रश्न · रचनात्मक लेखन
+                      </span>
+                    </div>
+
+                    {lastCombinedAttempt && (
+                      <span className="text-xs font-black text-emerald-900 bg-emerald-100 px-3 py-1 rounded-full border border-emerald-300">
+                        अंतिम स्कोर: {lastCombinedAttempt.percentage}%
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <h4 className="text-xl sm:text-2xl font-black text-slate-900 font-serif-display">
+                      {combinedWorkbook.titleHindi}
+                    </h4>
+                    <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                      {combinedWorkbook.descriptionHindi}
+                    </p>
+                  </div>
+
+                  {/* Included Question Types Breakdown */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                    <div className="p-3 rounded-2xl bg-white border border-indigo-200">
+                      <div className="font-black text-indigo-900">१. मानक MCQ</div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">{combinedWorkbook.mcqQuestions.length} मिश्रित प्रश्न</div>
+                    </div>
+                    <div className="p-3 rounded-2xl bg-white border border-indigo-200">
+                      <div className="font-black text-indigo-900">२. अनुच्छेद चयन</div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">{combinedWorkbook.paragraphQuestions.length} शब्द व वाक्य भेद</div>
+                    </div>
+                    <div className="p-3 rounded-2xl bg-white border border-indigo-200">
+                      <div className="font-black text-indigo-900">३. संक्षिप्त 2-पंक्ति प्रश्न</div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">{combinedWorkbook.shortQuestions?.length || 4} AI जाँच सहित</div>
+                    </div>
+                    <div className="p-3 rounded-2xl bg-white border border-rose-200">
+                      <div className="font-black text-rose-800 flex items-center gap-1">
+                        <PenTool className="w-3.5 h-3.5" />
+                        <span>४. रचनात्मक लेखन</span>
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">{combinedWorkbook.creativeWritingPrompt?.genreLabelHindi}</div>
+                    </div>
+                  </div>
+
+                  {/* Tracked Completed Topics */}
+                  {combinedWorkbook.trackedTopicNames && combinedWorkbook.trackedTopicNames.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                        ट्रैक किए गए संकलित विषय (Tracked Topics Included):
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {combinedWorkbook.trackedTopicNames.map((t, idx) => (
                           <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
-                              gate.isUnlockedBySim
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-amber-100 text-amber-900'
-                            }`}
+                            key={idx}
+                            className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white text-indigo-800 border border-indigo-200"
                           >
-                            {gate.isUnlockedBySim ? (
-                              <>
-                                <Unlock className="w-3 h-3" /> अनलॉक
-                              </>
-                            ) : (
-                              <>
-                                <Lock className="w-3 h-3" /> सिमुलेशन लॉक
-                              </>
-                            )}
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-3 border-t border-indigo-200/70 flex items-center justify-between flex-wrap gap-3">
+                    <span className="text-xs font-bold text-slate-600">
+                      {isCombinedWorkbookUnlocked
+                        ? 'यह संकलित पुस्तिका आपके खाते में अनलॉक है — अभ्यास करें, प्रिंट करें या डाउनलोड करें।'
+                        : `अनलॉक करने के लिए ${COMBINED_WORKBOOK_COST} WordCoins की आवश्यकता है (वर्तमान बैलेंस: ${wordCoins} WordCoins)`}
+                    </span>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isCombinedWorkbookUnlocked && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              downloadInteractiveWorkbookDocument({
+                                titleHindi: combinedWorkbook.titleHindi,
+                                titleEnglish: combinedWorkbook.titleEnglish,
+                                grade,
+                                board: 'ICSE',
+                                studentName: currentUser?.userName,
+                                trackedTopics: combinedWorkbook.trackedTopicNames,
+                                mcqQuestions: combinedWorkbook.mcqQuestions,
+                                paragraphQuestions: combinedWorkbook.paragraphQuestions,
+                                shortQuestions: combinedWorkbook.shortQuestions,
+                                creativePrompt: combinedWorkbook.creativeWritingPrompt,
+                                includeAnswers: false,
+                              })
+                            }
+                            className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>डाउनलोड</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              printInteractiveWorkbookDocument({
+                                titleHindi: combinedWorkbook.titleHindi,
+                                titleEnglish: combinedWorkbook.titleEnglish,
+                                grade,
+                                board: 'ICSE',
+                                studentName: currentUser?.userName,
+                                trackedTopics: combinedWorkbook.trackedTopicNames,
+                                mcqQuestions: combinedWorkbook.mcqQuestions,
+                                paragraphQuestions: combinedWorkbook.paragraphQuestions,
+                                shortQuestions: combinedWorkbook.shortQuestions,
+                                creativePrompt: combinedWorkbook.creativeWritingPrompt,
+                                includeAnswers: false,
+                              })
+                            }
+                            className="px-3.5 py-2.5 bg-white hover:bg-indigo-50 text-indigo-900 border border-indigo-300 rounded-xl text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+                          >
+                            <Printer className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>प्रिंट / PDF</span>
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleOpenCombinedWorkbook}
+                        className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm ${
+                          isCombinedWorkbookUnlocked
+                            ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                            : wordCoins >= COMBINED_WORKBOOK_COST
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        <span>
+                          {isCombinedWorkbookUnlocked
+                            ? 'समग्र अभ्यास पुस्तिका हल करें'
+                            : `${COMBINED_WORKBOOK_COST} WordCoins से अनलॉक करें`}
+                        </span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* ================= SECTION 3: ORDINARY WORKSHEET STORE (LESSON + WORDCOINS) ================= */}
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 font-serif-display">
+                  भाग ३ · सामान्य वर्कशीट स्टोर ({grade} Ordinary Worksheet Store)
+                </h3>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-bold">
+                  <Lock className="w-3 h-3" />
+                  <span>{gradeStoreWorksheets.length} वर्कशीट्स</span>
+                </span>
+              </div>
+              <span className="text-xs text-slate-500">
+                पाठ पूर्ण करने व WordCoins से अनलॉक करें · एक 4-WordCoin वर्कशीट सदैव अनलॉक
+              </span>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-5">
+              {gradeStoreWorksheets.map((ws) => {
+                const isAlwaysFree = ws.id === alwaysUnlockedWorksheetId || Boolean(ws.isUnlocked);
+                const isUnlocked = isWorksheetUnlocked(ws);
+                const savedResult = completedWorksheetResults?.[ws.id];
+                const gate = checkStoreWorksheetGate(ws, grade, {
+                  simulationCompletions,
+                  completedSimulationModules,
+                });
+
+                return (
+                  <div
+                    key={ws.id}
+                    className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm flex flex-col justify-between space-y-4 relative overflow-hidden"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <img
+                            src="/assets/aistudio/mail.google_a65ce30f.png"
+                            alt="शब्दशिल्प (ShabdShilp) Logo"
+                            className="w-10 h-10 rounded-lg object-cover object-center border border-slate-200 bg-[#091124] shrink-0"
+                          />
+                          <img
+                            src="/assets/aistudio/TechPreneur_Logo_a019c2b1.png"
+                            alt="TechPreneur Logo"
+                            className="w-10 h-10 rounded-lg bg-white p-0.5 border border-slate-200 object-contain shrink-0"
+                          />
+                          <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
+                            {ws.questionCount} प्रश्न
                           </span>
                         </div>
+                        <span
+                          className={`inline-flex items-center gap-1 px-3 py-1 font-extrabold text-xs rounded-full ${
+                            isAlwaysFree
+                              ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}
+                        >
+                          <Coins className={`w-3.5 h-3.5 ${isAlwaysFree ? 'text-emerald-700' : 'text-amber-700'}`} />
+                          <span>
+                            {isAlwaysFree ? `${ws.costWordCoins} WordCoins • निःशुल्क अनलॉक` : `${ws.costWordCoins} WordCoins`}
+                          </span>
+                        </span>
+                      </div>
 
-                        <h4 className="text-base font-black text-slate-900 font-serif-display leading-snug">
-                          {wb.titleHindi}
-                        </h4>
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          {wb.descriptionHindi}
-                        </p>
+                      <h4 className="text-xl font-black text-slate-900 font-serif-display">
+                        {ws.titleHindi}
+                      </h4>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {ws.descriptionHindi}
+                      </p>
 
-                        {/* Prerequisite Lesson Chips */}
+                      {!isUnlocked && (
                         <div className="flex flex-wrap gap-1.5 pt-1">
                           {gate.requirements.map((req) => (
                             <span
@@ -1409,158 +1742,71 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
                                   : 'bg-rose-50 text-rose-800 border-rose-200'
                               }`}
                             >
-                              {req.titleHindi}: {req.passed ? 'पूर्ण ✅' : `अपूर्ण (${req.completedCount}/${req.requiredCount}) ❌`}
+                              {req.titleHindi}: {req.passed ? 'पूर्ण ✅' : 'अपूर्ण ❌'}
                             </span>
                           ))}
                         </div>
-                      </div>
+                      )}
 
-                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        {lastAttempt ? (
-                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                            अंतिम स्कोर: {lastAttempt.percentage}%
+                      {Array.isArray(ws.topicsCovered) && ws.topicsCovered.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {ws.topicsCovered.map((topic, tIdx) => (
+                            <span
+                              key={tIdx}
+                              className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200"
+                            >
+                              {topic}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-slate-500">
+                        {isUnlocked ? (
+                          <span className="text-emerald-700 flex items-center gap-1">
+                            <Unlock className="w-3.5 h-3.5" /> {isAlwaysFree ? 'सदैव अनलॉक (Always Unlocked)' : 'अनलॉक है'}
+                          </span>
+                        ) : !gate.isUnlockedBySim ? (
+                          <span className="text-rose-700 flex items-center gap-1">
+                            <Lock className="w-3.5 h-3.5" /> सिमुलेशन पाठ अपूर्ण
                           </span>
                         ) : (
-                          <span className="text-[11px] font-semibold text-slate-500">
-                            0 WordCoins (सिमुलेशन आधारित)
+                          <span className="text-amber-700 flex items-center gap-1">
+                            <Lock className="w-3.5 h-3.5" /> अनलॉक हेतु तैयार
                           </span>
                         )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenInteractiveWorkbook(wb)}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
-                            gate.isUnlockedBySim
-                              ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
-                              : 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs'
-                          }`}
-                        >
-                          <span>{gate.isUnlockedBySim ? 'परीक्षण शुरू करें' : 'शर्त देखें'}</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Subsection 2B: Grade Store Worksheets */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <h4 className="text-lg font-black text-slate-900 font-serif-display">
-                    {grade} विषयवार स्टोर वर्कशीट्स (Grade Practice Sets)
-                  </h4>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-bold">
-                    <Lock className="w-3 h-3" />
-                    <span>{gradeStoreWorksheets.length} वर्कशीट्स</span>
-                  </span>
-                </div>
-                <span className="text-xs text-slate-500">
-                  हर 2 सही उत्तर पर 1 WordCoin मिलता है।
-                </span>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-5">
-                {gradeStoreWorksheets.map((ws) => {
-                  const isUnlocked = unlockedIds.includes(ws.id);
-                  const savedResult = completedWorksheetResults?.[ws.id];
-                  const gate = checkStoreWorksheetGate(ws, grade, {
-                    simulationCompletions,
-                    completedSimulationModules,
-                  });
-
-                  return (
-                    <div
-                      key={ws.id}
-                      className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm flex flex-col justify-between space-y-4 relative overflow-hidden"
-                    >
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <img
-                              src="/assets/aistudio/mail.google_a65ce30f.png"
-                              alt="शब्दशिल्प (ShabdShilp) Logo"
-                              className="w-10 h-10 rounded-lg object-cover object-center border border-slate-200 bg-[#091124] shrink-0"
-                            />
-                            <img
-                              src="/assets/aistudio/TechPreneur_Logo_a019c2b1.png"
-                              alt="TechPreneur Logo"
-                              className="w-10 h-10 rounded-lg bg-white p-0.5 border border-slate-200 object-contain shrink-0"
-                            />
-                            <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
-                              {ws.questionCount} प्रश्न
-                            </span>
-                          </div>
-                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-900 font-extrabold text-xs rounded-full">
-                            <Coins className="w-3.5 h-3.5 text-amber-700" />
-                            <span>{ws.costWordCoins} WordCoins</span>
+                        {savedResult && (
+                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            अंतिम स्कोर: {savedResult.score}/{savedResult.maxScore} ({savedResult.percentage}%)
                           </span>
-                        </div>
-
-                        <h4 className="text-xl font-black text-slate-900 font-serif-display">
-                          {ws.titleHindi}
-                        </h4>
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          {ws.descriptionHindi}
-                        </p>
-
-                        {!isUnlocked && (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {gate.requirements.map((req) => (
-                              <span
-                                key={req.moduleId}
-                                className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                                  req.passed
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-rose-50 text-rose-800 border-rose-200'
-                                }`}
-                              >
-                                {req.titleHindi}: {req.passed ? 'पूर्ण ✅' : 'अपूर्ण ❌'}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {Array.isArray(ws.topicsCovered) && ws.topicsCovered.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {ws.topicsCovered.map((topic, tIdx) => (
-                              <span
-                                key={tIdx}
-                                className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200"
-                              >
-                                {topic}
-                              </span>
-                            ))}
-                          </div>
                         )}
                       </div>
 
-                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-slate-500">
-                          {isUnlocked ? (
-                            <span className="text-emerald-700 flex items-center gap-1">
-                              <Unlock className="w-3.5 h-3.5" /> अनलॉक है
-                            </span>
-                          ) : !gate.isUnlockedBySim ? (
-                            <span className="text-rose-700 flex items-center gap-1">
-                              <Lock className="w-3.5 h-3.5" /> सिमुलेशन पाठ अपूर्ण
-                            </span>
-                          ) : (
-                            <span className="text-amber-700 flex items-center gap-1">
-                              <Lock className="w-3.5 h-3.5" /> अनलॉक हेतु तैयार
-                            </span>
-                          )}
-                          {savedResult && (
-                            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                              अंतिम स्कोर: {savedResult.score}/{savedResult.maxScore} ({savedResult.percentage}%)
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {isUnlocked && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isUnlocked && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadWorksheetDocument({
+                                  titleHindi: ws.titleHindi,
+                                  subtitle: ws.titleEnglish,
+                                  grade,
+                                  board: 'ICSE',
+                                  topic: ws.topicsCovered?.join(', '),
+                                  questions: ws.practiceQuestions || [],
+                                  includeAnswers: false,
+                                  includeEnglish: bilingualMode,
+                                })
+                              }
+                              className="px-3 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                              title="इस वर्कशीट को डाउनलोड करें"
+                            >
+                              <Download className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>डाउनलोड</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() =>
@@ -1581,34 +1827,34 @@ export const WorksheetsStore: React.FC<WorksheetsStoreProps> = ({
                               <Printer className="w-3.5 h-3.5 text-indigo-600" />
                               <span>प्रिंट</span>
                             </button>
-                          )}
-                          <button
-                            onClick={() => handleUnlock(ws)}
-                            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                              isUnlocked
-                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/25'
-                                : !gate.isUnlockedBySim
-                                ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-xs'
-                                : wordCoins >= ws.costWordCoins
-                                ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-xs'
-                                : 'bg-slate-200 text-slate-600'
-                            }`}
-                          >
-                            <span>
-                              {isUnlocked
-                                ? 'वर्कशीट हल करें'
-                                : !gate.isUnlockedBySim
-                                ? 'आवश्यक पाठ देखें'
-                                : 'अनलॉक करें'}
-                            </span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                          </>
+                        )}
+                        <button
+                          onClick={() => handleUnlock(ws)}
+                          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            isUnlocked
+                              ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/25'
+                              : !gate.isUnlockedBySim
+                              ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-xs'
+                              : wordCoins >= ws.costWordCoins
+                              ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-xs'
+                              : 'bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          <span>
+                            {isUnlocked
+                              ? 'वर्कशीट हल करें'
+                              : !gate.isUnlockedBySim
+                              ? 'आवश्यक पाठ देखें'
+                              : 'अनलॉक करें'}
+                          </span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

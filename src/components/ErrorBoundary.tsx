@@ -1,6 +1,6 @@
 import React from 'react';
 import { ShieldAlert, RotateCcw } from 'lucide-react';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { activeFirebaseConfig as firebaseConfig } from '../utils/firebase';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -48,7 +48,7 @@ export class ErrorBoundary extends React.Component<
       return this.props.children;
     }
 
-    const upgradeUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data?openUpgradeDialog=true`;
+    const upgradeUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/data?openUpgradeDialog=true`;
 
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">

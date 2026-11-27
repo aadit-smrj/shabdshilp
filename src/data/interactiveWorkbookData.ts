@@ -1,12 +1,23 @@
 import {
+  ComprehensionShortQuestion,
   GradeLevel,
+  InteractiveParagraphQuestion,
+  InteractiveWorkbookCreativePrompt,
   InteractiveWorkbookDefinition,
   QuizQuestion,
+  SavedReportSummary,
   UserProgressState,
   WorksheetItem,
 } from '../types';
 import { getCurriculumForGrade } from './classCurriculum';
 import { getSimulationMetadata } from './simulationMetadata';
+import {
+  getCanonicalTopicLabels,
+  getUniqueWorksheetQuestions,
+  normalizeQuestionKey,
+  resolveTopicKeyFromString,
+} from './worksheetBank';
+import { randomizeQuizSet } from '../utils/quizShuffle';
 
 export interface WorkbookPrerequisiteItem {
   moduleId: string;
@@ -730,3 +741,334 @@ export const INTERACTIVE_WORKBOOKS: InteractiveWorkbookDefinition[] = [
     ],
   },
 ];
+
+export const COMBINED_WORKBOOK_ID = 'combined_compiled_workbook_25';
+export const COMBINED_WORKBOOK_COST = 25;
+
+const TOPIC_SHORT_QA_BANK: Record<string, ComprehensionShortQuestion[]> = {
+  sangya: [
+    {
+      id: 'cwb_sq_sangya_1',
+      topicId: 'sangya',
+      topicNameHindi: 'संज्ञा',
+      topicNameEnglish: 'Noun (Sangya)',
+      questionHindi: '“बचपन में सभी को मिठास और मित्रता प्यारी लगती है।” इस वाक्य से दो भाववाचक संज्ञाएँ चुनकर कारण लिखें।',
+      questionEnglish: 'Pick two abstract nouns from the sentence and state why they are Bhavvachak Sangya (2 lines).',
+      sampleAnswerHindi: 'इस वाक्य में “बचपन”, “मिठास” और “मित्रता” भाववाचक संज्ञाएँ हैं क्योंकि ये अवस्था, गुण और भाव को प्रकट करती हैं जिन्हें छुआ नहीं जा सकता।',
+      sampleAnswerEnglish: 'Bachpan, Mithaas, and Mitrata are abstract nouns as they express state, quality, and feeling.',
+    },
+  ],
+  sarvanam: [
+    {
+      id: 'cwb_sq_sarvanam_1',
+      topicId: 'sarvanam',
+      topicNameHindi: 'सर्वनाम',
+      topicNameEnglish: 'Pronoun (Sarvanam)',
+      questionHindi: 'निजवाचक सर्वनाम और पुरुषवाचक सर्वनाम में क्या अंतर है? प्रत्येक का एक छोटा उदाहरण लिखें।',
+      questionEnglish: 'Differentiate between Nijvachak and Purushvachak Sarvanam with one brief example each.',
+      sampleAnswerHindi: 'पुरुषवाचक सर्वनाम वक्ता, श्रोता या अन्य के लिए आता है (जैसे: वह पढ़ता है), जबकि निजवाचक सर्वनाम कर्ता द्वारा स्वयं के लिए प्रयुक्त होता है (जैसे: मैं अपना कार्य स्वयं करूँगा)।',
+      sampleAnswerEnglish: 'Purushvachak refers to persons (मैं/तुम/वह), whereas Nijvachak indicates self by the subject (स्वयं/अपने आप).',
+    },
+  ],
+  visheshan: [
+    {
+      id: 'cwb_sq_visheshan_1',
+      topicId: 'visheshan',
+      topicNameHindi: 'विशेषण',
+      topicNameEnglish: 'Adjective (Visheshan)',
+      questionHindi: '“ईमानदार छात्र ने चार सुंदर पुस्तकें खरीदीं।” इसमें से गुणवाचक व संख्यावाचक विशेषण अलग-अलग लिखें।',
+      questionEnglish: 'Separate the qualitative and numeral adjectives from: “ईमानदार छात्र ने चार सुंदर पुस्तकें खरीदीं।”',
+      sampleAnswerHindi: '“ईमानदार” और “सुंदर” गुणवाचक विशेषण हैं क्योंकि ये संज्ञा के गुण बताते हैं, जबकि “चार” निश्चित संख्यावाचक विशेषण है।',
+      sampleAnswerEnglish: 'Imaandaar and Sundar are qualitative adjectives; Chaar is a definite numeral adjective.',
+    },
+  ],
+  karak: [
+    {
+      id: 'cwb_sq_karak_1',
+      topicId: 'karak',
+      topicNameHindi: 'कारक एवं परसर्ग',
+      topicNameEnglish: 'Case Markers (Karak)',
+      questionHindi: 'करण कारक और अपादान कारक दोनों में “से” विभक्ति आती है — उदाहरण सहित दोनों का अंतर स्पष्ट करें।',
+      questionEnglish: 'Both Karan and Apadan Karak use “से” — explain the difference with one example each.',
+      sampleAnswerHindi: 'करण कारक में “से” साधन का बोध कराता है (कलम से लिखा), जबकि अपादान कारक में “से” अलग होने या तुलना का भाव दर्शाता है (पेड़ से पत्ता गिरा)।',
+      sampleAnswerEnglish: 'Karan marks the instrument (कलम से), whereas Apadan marks separation or detachment (पेड़ से).',
+    },
+  ],
+  kriya: [
+    {
+      id: 'cwb_sq_kriya_1',
+      topicId: 'kriya',
+      topicNameHindi: 'क्रिया एवं काल',
+      topicNameEnglish: 'Verbs & Tenses',
+      questionHindi: 'सकर्मक और अकर्मक क्रिया की पहचान कैसे की जाती है? एक-एक वाक्य लिखकर बताएँ।',
+      questionEnglish: 'How do we distinguish Sakarmak and Akarmak Kriya? Explain with one sentence each.',
+      sampleAnswerHindi: 'क्रिया से “क्या” या “किसको” प्रश्न करने पर उत्तर मिले तो सकर्मक क्रिया होती है (रमा फल खाती है), अन्यथा अकर्मक क्रिया होती है (बच्चा हँसता है)।',
+      sampleAnswerEnglish: 'If asking "what/whom" yields an object, it is Sakarmak (रमा फल खाती है); otherwise Akarmak (बच्चा हँसता है).',
+    },
+  ],
+  kaal: [
+    {
+      id: 'cwb_sq_kaal_1',
+      topicId: 'kaal',
+      topicNameHindi: 'काल (Tenses)',
+      topicNameEnglish: 'Tenses',
+      questionHindi: '“रोहन कविता लिखता है।” इस वाक्य को अपूर्ण भूतकाल तथा सामान्य भविष्यत् काल में परिवर्तित करें।',
+      questionEnglish: 'Convert “रोहन कविता लिखता है।” into Past Continuous and Simple Future tense.',
+      sampleAnswerHindi: 'अपूर्ण भूतकाल: रोहन कविता लिख रहा था। सामान्य भविष्यत् काल: रोहन कविता लिखेगा।',
+      sampleAnswerEnglish: 'Past Continuous: रोहन कविता लिख रहा था। Simple Future: रोहन कविता लिखेगा।',
+    },
+  ],
+  vakya: [
+    {
+      id: 'cwb_sq_vakya_1',
+      topicId: 'vakya',
+      topicNameHindi: 'वाक्य-भेद व रूपांतरण',
+      topicNameEnglish: 'Sentence Structure & Transformation',
+      questionHindi: '“परिश्रमी छात्र सफल होते हैं।” इस सरल वाक्य को मिश्र वाक्य में बदलकर लिखें और योजक शब्द रेखांकित करें।',
+      questionEnglish: 'Transform “परिश्रमी छात्र सफल होते हैं।” into a Complex Sentence (मिश्र वाक्य).',
+      sampleAnswerHindi: 'मिश्र वाक्य: “जो छात्र परिश्रम करते हैं, वे सफल होते हैं।” इसमें “जो...वे” संबंधवाचक योजक एक प्रधान और एक आश्रित उपवाक्य को जोड़ते हैं।',
+      sampleAnswerEnglish: 'जो छात्र परिश्रम करते हैं, वे सफल होते हैं।',
+    },
+  ],
+  samas: [
+    {
+      id: 'cwb_sq_samas_1',
+      topicId: 'samas',
+      topicNameHindi: 'समास एवं उपसर्ग-प्रत्यय',
+      topicNameEnglish: 'Compounds & Affixes',
+      questionHindi: '“नीलकंठ” का समास-विग्रह कीजिए तथा बताइए कि इसमें कर्मधारय व बहुव्रीहि समास किस आधार पर भिन्न होते हैं?',
+      questionEnglish: 'Do Samas Vigrah of “नीलकंठ” and explain how Karmadharay differs from Bahuvrihi.',
+      sampleAnswerHindi: '“नीला है जो कंठ” — कर्मधारय समास (विशेषण-विशेष्य संबंध), किंतु “नीला है कंठ जिसका अर्थात् शिव” — बहुव्रीहि समास (तीसरे विशेष अर्थ की प्रधानता)।',
+      sampleAnswerEnglish: 'नीला है जो कंठ (Karmadharay) vs नीला है कंठ जिसका अर्थात् शिव (Bahuvrihi).',
+    },
+  ],
+  muhavare: [
+    {
+      id: 'cwb_sq_muhavare_1',
+      topicId: 'muhavare',
+      topicNameHindi: 'मुहावरे और लोकोक्तियाँ',
+      topicNameEnglish: 'Idioms & Proverbs',
+      questionHindi: '“कमर कसना” और “लोहे के चने चबाना” मुहावरों का अर्थ लिखकर दोनों से एक-एक सार्थक वाक्य बनाइए।',
+      questionEnglish: 'Write the meaning and one sentence each for “कमर कसना” and “लोहे के चने चबाना”.',
+      sampleAnswerHindi: 'कमर कसना (दृढ़ निश्चय करना): बोर्ड परीक्षा के लिए छात्रों ने कमर कस ली है। लोहे के चने चबाना (कठिन कार्य करना): पर्वत शिखर पर चढ़ना लोहे के चने चबाने जैसा है।',
+      sampleAnswerEnglish: 'कमर कसना = prepare firmly; लोहे के चने चबाना = face a tough task.',
+    },
+  ],
+  ashuddhi: [
+    {
+      id: 'cwb_sq_ashuddhi_1',
+      topicId: 'ashuddhi',
+      topicNameHindi: 'अशुद्धि शोधन व विराम-चिह्न',
+      topicNameEnglish: 'Error Correction & Punctuation',
+      questionHindi: '“अनेकों छात्रों ने मेरे को पुस्तक दिया।” इस वाक्य की सभी व्याकरणिक अशुद्धियाँ पहचानकर शुद्ध वाक्य लिखें।',
+      questionEnglish: 'Correct the grammatical errors in: “अनेकों छात्रों ने मेरे को पुस्तक दिया।”',
+      sampleAnswerHindi: 'शुद्ध वाक्य: “अनेक छात्रों ने मुझे पुस्तक दी।” (“अनेकों” के स्थान पर “अनेक”, “मेरे को” के स्थान पर “मुझे” तथा “पुस्तक” स्त्रीलिंग होने से “दी” प्रयुक्त होगा।)',
+      sampleAnswerEnglish: 'अनेक छात्रों ने मुझे पुस्तक दी।',
+    },
+  ],
+};
+
+function getCreativePromptForCompiledWorkbook(
+  grade: GradeLevel,
+  trackedLabels: string[]
+): InteractiveWorkbookCreativePrompt {
+  const focusHint = trackedLabels.slice(0, 3).join(', ') || 'संज्ञा, विशेषण, कारक व वाक्य-रचना';
+  if (grade === 'कक्षा 9' || grade === 'कक्षा 10') {
+    return {
+      genreId: 'patra',
+      genreLabelHindi: 'औपचारिक / अनौपचारिक पत्र व सृजनात्मक लेखन',
+      titleHindi: 'अपने मित्र या विद्यालय प्रधानाचार्य को समय-प्रबंधन एवं मातृभाषा हिंदी के महत्व पर पत्र लिखिए',
+      instructionsHindi: `अपने पूर्ण किए गए पाठों (${focusHint}) की व्याकरणिक शुद्धता — विशेषकर सटीक कारक, मिश्र-संयुक्त वाक्य व विराम-चिह्नों का प्रयोग करते हुए लगभग 100-120 शब्दों में प्रभावशाली पत्र लिखें।`,
+      instructionsEnglish: `Write a structured ICSE-style Hindi letter (~100-120 words) applying your tracked grammar topics (${focusHint}) accurately.`,
+      wordLimit: 110,
+      hintsHindi: [
+        'बाएँ हाशिये से दिनांक व सटीक संबोधन प्रारंभ करें',
+        'कम से कम एक मिश्र/संयुक्त वाक्य व एक सटीक मुहावरा प्रयोग करें',
+        'वर्तनी, कारक-चिह्नों और विराम-चिह्नों की शुद्धता बनाए रखें',
+      ],
+    };
+  }
+  if (grade === 'कक्षा 7' || grade === 'कक्षा 8') {
+    return {
+      genreId: 'anuched',
+      genreLabelHindi: 'अनुच्छेद लेखन (ICSE Paragraph Writing)',
+      titleHindi: '“परिश्रम और अनुशासन ही सफलता की कुंजी है” — सृजनात्मक अनुच्छेद',
+      instructionsHindi: `अपने ट्रैक किए गए व्याकरण अध्यायों (${focusHint}) के नियमों — उपयुक्त विशेषण, सटीक काल तथा एक मुहावरे का प्रयोग करते हुए एक सुसंगठित अनुच्छेद (80-100 शब्द) लिखें।`,
+      instructionsEnglish: `Compose one cohesive Hindi paragraph (~80-100 words) demonstrating accurate usage of ${focusHint}.`,
+      wordLimit: 90,
+      hintsHindi: [
+        'केवल एक ही सतत अनुच्छेद में विचार पिरोएँ',
+        'दो गुणवाचक विशेषण व एक मुहावरे का स्वाभाविक प्रयोग करें',
+        'काल और लिंग-वचन की एकरूपता बनाए रखें',
+      ],
+    };
+  }
+  return {
+    genreId: 'katha',
+    genreLabelHindi: 'लघु कथा / अनुच्छेद लेखन (Creative Writing)',
+    titleHindi: '“मेरा यादगार विद्यालय दिवस” अथवा “एक सच्चा मित्र” पर सृजनात्मक लेखन',
+    instructionsHindi: `अपने पूर्ण किए गए अध्यायों (${focusHint}) से सीखी संज्ञा, सर्वनाम व विशेषण शब्दों का सुंदर प्रयोग करते हुए लगभग 60-80 शब्दों में सरल व शुद्ध रचना लिखें।`,
+    instructionsEnglish: `Write a short creative story or paragraph (~60-80 words) using nouns, pronouns, and adjectives accurately.`,
+    wordLimit: 75,
+    hintsHindi: [
+      'आकर्षक शीर्षक के साथ 5-7 स्पष्ट वाक्य लिखें',
+      'भूतकाल या वर्तमान काल की सही क्रियाएँ प्रयोग करें',
+      'अंत में 1 पंक्ति की सुंदर सीख लिखें',
+    ],
+  };
+}
+
+/**
+ * Builds the SINGLE Combined Compiled Sample Workbook (25 WordCoins) dynamically
+ * from the student's tracked completed topics across simulations and reports,
+ * combining 15 MCQs + Zero-Hint Paragraph selection + 4 2-line Short Questions + Rachanatmak Lekhan.
+ */
+export function buildCombinedCompiledWorkbook(params: {
+  grade: GradeLevel;
+  completedSimulationModules?: string[];
+  simulationCompletions?: Record<string, number>;
+  savedReports?: SavedReportSummary[];
+}): InteractiveWorkbookDefinition {
+  const {
+    grade,
+    completedSimulationModules = [],
+    simulationCompletions = {},
+    savedReports = [],
+  } = params;
+
+  const curriculum = getCurriculumForGrade(grade);
+
+  // 1. Gather tracked completed module IDs from simulations + completion map + saved chapter reports
+  const trackedSet = new Set<string>();
+  for (const modId of completedSimulationModules) {
+    if (modId) trackedSet.add(modId);
+  }
+  for (const [modId, count] of Object.entries(simulationCompletions)) {
+    if (Number(count) > 0) trackedSet.add(modId);
+  }
+  for (const rep of savedReports) {
+    if (rep?.moduleId) trackedSet.add(rep.moduleId);
+  }
+
+  const hasTrackedModules = trackedSet.size > 0;
+  const activeTopicIds = hasTrackedModules
+    ? Array.from(trackedSet)
+    : curriculum.simulationModuleIds.slice(0, 4);
+
+  const trackedTopicNames = activeTopicIds.map((modId) => {
+    const meta = getSimulationMetadata(modId);
+    return MODULE_TITLE_FALLBACK[modId] || meta.uniqueSimNameHindi || getCanonicalTopicLabels(resolveTopicKeyFromString(modId)).hi;
+  });
+
+  // 2. Compile 15 mixed MCQs across tracked completed topics (with grade syllabus fallback)
+  const mcqSeen = new Set<string>();
+  const compiledMcqs: QuizQuestion[] = [];
+  const topicKeysOrder = Array.from(
+    new Set([
+      ...activeTopicIds.map((id) => resolveTopicKeyFromString(id)),
+      ...curriculum.mixedBankKeys,
+    ])
+  );
+
+  for (const topicKey of topicKeysOrder) {
+    if (compiledMcqs.length >= 15) break;
+    const labels = getCanonicalTopicLabels(topicKey);
+    const batch = getUniqueWorksheetQuestions(topicKey, 4, labels.hi, labels.en, [], grade);
+    for (const q of batch) {
+      if (compiledMcqs.length >= 15) break;
+      const key = normalizeQuestionKey(q.questionHindi);
+      if (!key || mcqSeen.has(key)) continue;
+      mcqSeen.add(key);
+      compiledMcqs.push({
+        ...q,
+        id: `cwb_mcq_${compiledMcqs.length + 1}_${topicKey}`,
+      });
+    }
+  }
+
+  if (compiledMcqs.length < 15) {
+    const fillBatch = getUniqueWorksheetQuestions(
+      'mixed_board',
+      15 - compiledMcqs.length + 4,
+      'मिश्रित व्याकरण',
+      'Mixed Grammar',
+      compiledMcqs,
+      grade
+    );
+    for (const q of fillBatch) {
+      if (compiledMcqs.length >= 15) break;
+      const key = normalizeQuestionKey(q.questionHindi);
+      if (!key || mcqSeen.has(key)) continue;
+      mcqSeen.add(key);
+      compiledMcqs.push(q);
+    }
+  }
+
+  // 3. Compile Zero-Hint Interactive Paragraph Questions (prioritizing tracked topics, mixing word + sentence)
+  const allParaPool: InteractiveParagraphQuestion[] = INTERACTIVE_WORKBOOKS.flatMap(
+    (wb) => wb.paragraphQuestions
+  );
+  const resolvedTrackedSet = new Set(activeTopicIds.map((id) => resolveTopicKeyFromString(id)));
+  const prioritizedPara = [...allParaPool].sort((a, b) => {
+    const aMatch = resolvedTrackedSet.has(resolveTopicKeyFromString(a.topicId)) ? 1 : 0;
+    const bMatch = resolvedTrackedSet.has(resolveTopicKeyFromString(b.topicId)) ? 1 : 0;
+    return bMatch - aMatch;
+  });
+
+  // Always include at least one word-mode and one sentence-mode, up to 3 total
+  const wordParas = prioritizedPara.filter((p) => p.mode === 'word');
+  const sentParas = prioritizedPara.filter((p) => p.mode === 'sentence');
+  const selectedParagraphQuestions: InteractiveParagraphQuestion[] = [];
+  if (wordParas[0]) selectedParagraphQuestions.push(wordParas[0]);
+  if (sentParas[0]) selectedParagraphQuestions.push(sentParas[0]);
+  for (const pq of prioritizedPara) {
+    if (selectedParagraphQuestions.length >= 3) break;
+    if (!selectedParagraphQuestions.some((s) => s.id === pq.id)) {
+      selectedParagraphQuestions.push(pq);
+    }
+  }
+
+  // 4. Compile 4 two-line Short Questions prioritized by tracked completed topics
+  const shortSeen = new Set<string>();
+  const compiledShorts: ComprehensionShortQuestion[] = [];
+  const shortKeysOrder = Array.from(
+    new Set([
+      ...activeTopicIds.map((id) => resolveTopicKeyFromString(id)),
+      ...Object.keys(TOPIC_SHORT_QA_BANK),
+    ])
+  );
+  for (const key of shortKeysOrder) {
+    if (compiledShorts.length >= 4) break;
+    const list = TOPIC_SHORT_QA_BANK[key] || [];
+    for (const sq of list) {
+      if (compiledShorts.length >= 4) break;
+      if (shortSeen.has(sq.id)) continue;
+      shortSeen.add(sq.id);
+      compiledShorts.push(sq);
+    }
+  }
+
+  // 5. Creative Writing (Rachanatmak Lekhan) aligned to grade & tracked topics
+  const creativeWritingPrompt = getCreativePromptForCompiledWorkbook(grade, trackedTopicNames);
+
+  return {
+    id: COMBINED_WORKBOOK_ID,
+    titleHindi: `संकलित समग्र अभ्यास पुस्तिका (${grade})`,
+    titleEnglish: `Combined Compiled Sample Workbook (${grade})`,
+    descriptionHindi: hasTrackedModules
+      ? `आपके द्वारा पूर्ण किए गए ${activeTopicIds.length} ट्रैक किए गए पाठों पर आधारित एकमात्र समग्र अभ्यास पुस्तिका — इसमें 15 मिश्रित MCQ, अनुच्छेद शब्द/वाक्य पहचान, 4 दो-पंक्ति प्रश्न व रचनात्मक लेखन शामिल हैं।`
+      : `आपके ${grade} पाठ्यक्रम के प्रमुख विषयों पर आधारित समग्र सैंपल अभ्यास पुस्तिका — जैसे-जैसे आप पाठ पूर्ण करेंगे, इसमें वे विषय स्वतः संकलित होते जाएँगे। (15 MCQ + अनुच्छेद परीक्षण + लघु प्रश्न + रचनात्मक लेखन)`,
+    descriptionEnglish:
+      'One unified compiled sample workbook combining your tracked completed topics with MCQs, paragraph grammar selection, 2-line short Q&A, and Rachanatmak Lekhan.',
+    topicsCovered: trackedTopicNames,
+    trackedTopicNames,
+    costWordCoins: COMBINED_WORKBOOK_COST,
+    requiredLessonModuleIds: [],
+    minCompletionsPerRequiredLesson: 0,
+    mcqQuestions: randomizeQuizSet(compiledMcqs).slice(0, 15),
+    paragraphQuestions: selectedParagraphQuestions,
+    shortQuestions: compiledShorts,
+    creativeWritingPrompt,
+  };
+}
+
